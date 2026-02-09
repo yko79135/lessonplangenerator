@@ -7,7 +7,13 @@ from typing import Dict, List, Optional
 
 import streamlit as st
 
-from lessonplan_bot import generate_weekly_draft, parse_syllabus_pdf
+from lessonplan_bot import (
+    generate_lesson_table_rows_text,
+    infer_lesson_datetime,
+    parse_curriculum_sheet,
+    parse_syllabus_pdf,
+    suggest_topic_objective,
+)
 from google_drive_uploader import upload_report_as_google_doc
 from pdf_template import has_cjk_font, render_week_pdf
 
@@ -35,13 +41,22 @@ def save_index(index: List[Dict]) -> None:
     INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def add_syllabus(uploaded_file) -> None:
+def add_syllabus(uploaded_file, curriculum_file=None) -> None:
     file_id = str(uuid.uuid4())
     safe_name = uploaded_file.name.replace("/", "_").replace("\\", "_")
     save_path = SYLLABI_DIR / f"{file_id}_{safe_name}"
     save_path.write_bytes(uploaded_file.getbuffer())
 
     weeks = parse_syllabus_pdf(save_path)
+
+    curriculum_rows = []
+    curriculum_path = ""
+    if curriculum_file is not None:
+        cur_name = curriculum_file.name.replace("/", "_").replace("\\", "_")
+        curriculum_path_obj = SYLLABI_DIR / f"{file_id}_curriculum_{cur_name}"
+        curriculum_path_obj.write_bytes(curriculum_file.getbuffer())
+        curriculum_rows = parse_curriculum_sheet(curriculum_path_obj)
+        curriculum_path = str(curriculum_path_obj)
     index = load_index()
     index.append(
         {
@@ -50,6 +65,8 @@ def add_syllabus(uploaded_file) -> None:
             "path": str(save_path),
             "uploaded_at": datetime.now().isoformat(timespec="seconds"),
             "weeks": weeks,
+            "curriculum_rows": curriculum_rows,
+            "curriculum_path": curriculum_path,
         }
     )
     save_index(index)
@@ -62,6 +79,8 @@ def delete_syllabus(item_id: str) -> None:
         if item.get("id") == item_id:
             try:
                 Path(item.get("path", "")).unlink(missing_ok=True)
+                if item.get("curriculum_path"):
+                    Path(item.get("curriculum_path", "")).unlink(missing_ok=True)
             except Exception:
                 pass
         else:
@@ -102,12 +121,25 @@ def main() -> None:
             "전개|30분|핵심 내용 설명 및 활동|질의응답\n"
             "정리|10분|형성평가, 과제 안내|다음 시간 예고"
         )
+    if "last_auto_week_key" not in st.session_state:
+        st.session_state["last_auto_week_key"] = ""
+    if "auto_lesson_topic" not in st.session_state:
+        st.session_state["auto_lesson_topic"] = ""
+    if "auto_lesson_datetime" not in st.session_state:
+        st.session_state["auto_lesson_datetime"] = ""
+    if "auto_target_group" not in st.session_state:
+        st.session_state["auto_target_group"] = ""
 
     st.subheader("1) Syllabus Library")
     up = st.file_uploader("강의계획서 PDF 업로드", type=["pdf"])
+    curriculum_up = st.file_uploader(
+        "세부 진도표 업로드 (선택: .xlsx/.xls/.csv)",
+        type=["xlsx", "xls", "csv"],
+        help="주차/반/주제/목적 정보를 올리면 자동 기본값이 더 정확해집니다.",
+    )
     if up is not None:
         try:
-            add_syllabus(up)
+            add_syllabus(up, curriculum_up)
             st.success("업로드 및 파싱 완료. 아래 목록에서 선택하세요.")
             st.rerun()
         except Exception as exc:
@@ -138,13 +170,17 @@ def main() -> None:
     chosen_week = st.selectbox("Week", week_options)
     week_info = weeks[week_options.index(chosen_week)] if weeks else {"week_no": 1, "date_range": "N/A", "events": [], "details": ""}
 
-    subject = st.text_input("Subject", value="영어")
+    subject_default = selected.get("name", "").split(".")[0] if selected.get("name") else "영어"
+    subject = st.text_input("Subject", value=subject_default or "영어")
     class_plan_note = st.text_area("Brief class plan note", value="학생 참여형 활동을 강화")
+
+    curriculum_rows = selected.get("curriculum_rows", [])
+    auto_class_default = (week_info.get("events") or ["G6"])[0]
 
     col_a, col_b = st.columns(2)
     with col_a:
         teacher_name = st.text_input("Teacher name", value="고영찬")
-        class_name = st.text_input("Class name", value="11A")
+        class_name = st.text_input("Class name", value=auto_class_default)
         schedule = st.text_input("Schedule", value=f"{week_info.get('date_range', 'N/A')} / 40분")
     with col_b:
         materials = st.text_input("Materials", value="교재, 활동지, PPT")
@@ -152,55 +188,62 @@ def main() -> None:
 
     if st.button("3) 초안 생성", type="primary"):
         try:
-            st.session_state["draft_text"] = generate_weekly_draft(
-                subject=subject,
+            st.session_state["lesson_rows_input"] = generate_lesson_table_rows_text(
                 week_info=week_info,
                 class_plan_note=class_plan_note,
-                teacher_name=teacher_name,
-                class_name=class_name,
-                schedule=schedule,
-                materials=materials,
                 include_prayer=include_prayer,
             )
         except Exception as exc:
             st.error(f"초안 생성 실패: {exc}")
             st.code(traceback.format_exc())
 
-    st.subheader("3) PDF 문서 양식 순서대로 입력")
-    st.caption("아래 입력 순서는 PDF 결과 문서의 배치 순서(상단 헤더 → 주제/목적 → 수업계획서 → 수업보고서)와 동일합니다.")
+    auto = suggest_topic_objective(
+        week_info=week_info,
+        class_name=class_name,
+        subject=subject,
+        curriculum_rows=curriculum_rows,
+    )
+    inferred_datetime = infer_lesson_datetime(week_info)
+    inferred_target = class_name or auto_class_default
+
+    current_week_key = f"{selected.get('id')}::{week_info.get('week_no')}::{class_name}::{subject}"
+    if st.session_state.get("last_auto_week_key") != current_week_key:
+        st.session_state["auto_lesson_topic"] = auto.get("lesson_topic", subject)
+        st.session_state["auto_lesson_datetime"] = inferred_datetime
+        st.session_state["auto_target_group"] = inferred_target
+        st.session_state["theme_objective"] = auto.get("theme_objective", f"{subject} 핵심 개념 이해 및 적용")
+        st.session_state["last_auto_week_key"] = current_week_key
+
+    st.caption("입력 순서는 PDF 결과 문서의 배치 순서(상단 헤더 → 주제/목적 → 수업계획서 → 수업보고서)와 동일합니다.")
 
     st.markdown("#### 상단 헤더")
     doc_title = st.text_input("문서 제목", value="주간 수업 계획서 및 보고서")
-    lesson_topic = st.text_input("Lesson topic", value=subject)
-    lesson_datetime = st.text_input("Lesson date/time", value=f"{week_info.get('date_range', 'N/A')} / {schedule}")
-    target_group = st.text_input("Target group", value=class_name)
+    lesson_topic = st.text_input("Lesson topic", key="auto_lesson_topic")
+    lesson_datetime = st.text_input("Lesson date/time", key="auto_lesson_datetime")
+    target_group = st.text_input("Target group", key="auto_target_group")
     materials = st.text_input("수업 필요 물품 / 준비물", value=materials)
 
     st.markdown("#### 수업 주제 및 수업 목적")
-    if not st.session_state["theme_objective"]:
-        st.session_state["theme_objective"] = f"{subject} 핵심 개념 이해 및 적용"
     if not st.session_state["teacher_notes"]:
         st.session_state["teacher_notes"] = class_plan_note
     theme_objective = st.text_area("Theme/Objectives", key="theme_objective")
-
-    st.markdown("#### 수업계획서 표")
-    st.caption("한 줄에 `단계|시간|내용|비고` 형식으로 입력하세요.")
-    row_input = st.text_area(
-        "Lesson plan rows (단계|시간|내용|비고 per line)",
-        key="lesson_rows_input",
-        height=140,
-    )
 
     st.markdown("#### 수업보고서")
     evaluation = st.text_area("Evaluation", key="evaluation")
     student_notes = st.text_area("Student notes", key="student_notes")
     teacher_notes = st.text_area("Teacher notes", key="teacher_notes")
+    student_notes_final = student_notes.strip() or "특이사항 없음"
 
-    st.markdown("#### 첨부 초안 텍스트")
-    draft_text = st.text_area("4) Draft text (편집 가능)", key="draft_text", height=320)
+    st.markdown("#### 수업계획서 표 (자동 초안, 편집 가능)")
+    draft_text = st.text_area(
+        "수업계획서 표 원문 (TXT 다운로드용)",
+        key="lesson_rows_input",
+        height=220,
+        help="초안 생성 시 수업계획서 표(도입/전개/마무리) 내용만 자동 작성됩니다.",
+    )
 
     lesson_rows = []
-    for line in row_input.splitlines():
+    for line in draft_text.splitlines():
         if not line.strip():
             continue
         parts = [p.strip() for p in line.split("|")]
@@ -226,10 +269,10 @@ def main() -> None:
                 "target_group": target_group,
                 "theme_objective": theme_objective,
                 "evaluation": evaluation,
-                "student_notes": student_notes,
+                "student_notes": student_notes_final,
                 "teacher_notes": teacher_notes,
                 "lesson_rows": lesson_rows,
-                "edited_draft": draft_text,
+                "edited_draft": "",
             }
         )
         st.download_button(

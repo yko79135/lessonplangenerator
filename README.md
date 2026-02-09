@@ -25,6 +25,7 @@ streamlit run web_app.py
 - Uploaded PDF files are saved under `data/syllabi/` with unique IDs.
 - Parsed metadata is stored in `data/syllabi_index.json`.
 - Users can select previously uploaded syllabi and delete any saved syllabus from the library.
+- Optional curriculum spreadsheets (`.xlsx/.xls/.csv`) can be uploaded with syllabus files to auto-fill lesson topic/objective by week/class.
 
 ## Notes
 - PDF parsing tries `pypdf` first, then `PyPDF2` fallback.
