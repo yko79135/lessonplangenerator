@@ -35,6 +35,30 @@ def _chunk_unbroken(text: str, chunk: int = 36) -> str:
     return " ".join(parts) if parts else text
 
 
+def _wrap_text(pdf: FPDF, text: str, max_width: float) -> List[str]:
+    """Hard-wrap text to avoid FPDF horizontal-space crashes with long/unbroken strings."""
+    clean = _safe_text(text, max_len=4000).replace("\r\n", "\n").replace("\r", "\n")
+    lines: List[str] = []
+    for raw in clean.split("\n"):
+        segment = _chunk_unbroken(raw, 22)
+        if not segment:
+            lines.append("")
+            continue
+
+        current = ""
+        for ch in segment:
+            trial = f"{current}{ch}"
+            if pdf.get_string_width(trial) <= max_width or not current:
+                current = trial
+            else:
+                lines.append(current)
+                current = ch
+        if current:
+            lines.append(current)
+
+    return lines if lines else [""]
+
+
 class LessonPDF(FPDF):
     def __init__(self) -> None:
         super().__init__(orientation="P", unit="mm", format="A4")
@@ -51,47 +75,92 @@ def render_week_pdf(template_fields: Dict) -> bytes:
     pdf.add_page()
     fn = pdf.font_name
 
-    def title(txt: str) -> None:
-        pdf.set_font(fn, size=16)
-        pdf.cell(0, 10, _safe_text(txt), new_x="LMARGIN", new_y="NEXT", align="C")
+    page_w = pdf.w - pdf.l_margin - pdf.r_margin
 
-    def field_row(left: str, right: str, w_left: float = 35) -> None:
-        pdf.set_font(fn, size=10)
-        pdf.cell(w_left, 8, _safe_text(left), border=1)
-        x = pdf.get_x()
+    def draw_box(x: float, y: float, w: float, h: float) -> None:
+        pdf.rect(x, y, w, h)
+
+    def draw_wrapped_text(x: float, y: float, w: float, h: float, text: str, *, size: int = 10, pad: float = 1.8, bold: bool = False) -> None:
+        pdf.set_font(fn, style="B" if bold else "", size=size)
+        lines = _wrap_text(pdf, text, max_width=max(5.0, w - (pad * 2)))
+        line_h = max(5.6, size * 0.45)
+        max_lines = max(1, int((h - (pad * 2)) // line_h))
+        lines = lines[:max_lines]
+        ty = y + pad
+        for ln in lines:
+            pdf.set_xy(x + pad, ty)
+            pdf.cell(w - (pad * 2), line_h, ln)
+            ty += line_h
+
+    def section_header(text: str) -> None:
+        x = pdf.l_margin
         y = pdf.get_y()
-        right_clean = _chunk_unbroken(_safe_text(right, max_len=400))
-        pdf.multi_cell(0, 8, right_clean, border=1)
-        pdf.set_xy(x, y + max(8, pdf.font_size * 1.8))
+        h = 8
+        draw_box(x, y, page_w, h)
+        pdf.set_font(fn, style="B", size=12)
+        pdf.set_xy(x, y)
+        pdf.cell(page_w, h, _safe_text(text, 120), align="C")
+        pdf.set_y(y + h)
 
-    title(template_fields.get("doc_title", "주간 수업안 및 보고서"))
+    def key_value_row(label: str, value: str, row_h: float = 9) -> None:
+        x = pdf.l_margin
+        y = pdf.get_y()
+        lw = 44
+        draw_box(x, y, lw, row_h)
+        draw_box(x + lw, y, page_w - lw, row_h)
+        draw_wrapped_text(x, y, lw, row_h, label, bold=True)
+        draw_wrapped_text(x + lw, y, page_w - lw, row_h, value)
+        pdf.set_y(y + row_h)
 
-    pdf.set_font(fn, size=10)
-    width = (pdf.w - pdf.l_margin - pdf.r_margin) / 4
-    headers = [
-        ("교사", template_fields.get("teacher_name", "고영찬")),
-        ("과목", template_fields.get("subject", "")),
-        ("주차", template_fields.get("week_label", "")),
-        ("반", template_fields.get("class_name", "")),
-    ]
-    for label, value in headers:
-        pdf.cell(width * 0.35, 8, _safe_text(label), border=1)
-        pdf.cell(width * 0.65, 8, _safe_text(value, 80), border=1)
-    pdf.ln(8)
+    pdf.set_font(fn, style="B", size=20)
+    pdf.cell(0, 11, _safe_text(template_fields.get("doc_title", "주간 수업 계획서 및 보고서"), 120), new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(1.5)
 
-    field_row("일정", template_fields.get("schedule", ""))
-    field_row("준비물", template_fields.get("materials", ""))
-    field_row("주제/목표", template_fields.get("theme_objective", ""))
+    # Header top area (matches sample's 2x2-like blocks)
+    x = pdf.l_margin
+    y = pdf.get_y()
+    total_h = 24
+    left_w = page_w * 0.5
+    right_w = page_w - left_w
+    draw_box(x, y, left_w, total_h)
+    draw_box(x + left_w, y, right_w, total_h)
+    draw_wrapped_text(x + 1, y + 1, left_w - 2, total_h - 2, f"교사: {template_fields.get('teacher_name', '고영찬')}\n수업: {template_fields.get('subject', '')}")
+    right_text = (
+        f"수업날짜: {template_fields.get('lesson_datetime', template_fields.get('week_label', ''))}\n"
+        f"대상: {template_fields.get('target_group', template_fields.get('class_name', ''))}"
+    )
+    draw_wrapped_text(x + left_w + 1, y + 1, right_w - 2, total_h - 2, right_text)
+    pdf.set_y(y + total_h)
 
-    pdf.ln(2)
-    pdf.set_font(fn, size=11)
-    pdf.cell(0, 8, "수업 계획", border=1, new_x="LMARGIN", new_y="NEXT")
+    key_value_row("수업 필요 물품 / 준비물:", template_fields.get("materials", ""), row_h=9)
+    pdf.ln(4)
 
-    pdf.set_font(fn, size=10)
-    col_w = [25, 22, 110, 33]
-    for h, w in zip(["단계", "시간", "내용", "비고"], col_w):
-        pdf.cell(w, 8, h, border=1, align="C")
-    pdf.ln(8)
+    section_header("수업 주제 및 수업 목적")
+    topic = template_fields.get("lesson_topic", "")
+    objective = template_fields.get("theme_objective", "")
+    topic_objective = f"수업 주제: {topic}\n수업 목적: {objective}"
+    body_h = 26
+    x = pdf.l_margin
+    y = pdf.get_y()
+    draw_box(x, y, page_w, body_h)
+    draw_wrapped_text(x, y, page_w, body_h, topic_objective)
+    pdf.set_y(y + body_h)
+    pdf.ln(4)
+
+    section_header("수업계획서")
+
+    col_w = [16, 25, 118, 31]
+    head_h = 8
+    x = pdf.l_margin
+    y = pdf.get_y()
+    headers = ["주제", "시간", "내용", "참고사항"]
+    for i, htxt in enumerate(headers):
+        cx = x + sum(col_w[:i])
+        draw_box(cx, y, col_w[i], head_h)
+        pdf.set_font(fn, style="B", size=11)
+        pdf.set_xy(cx, y)
+        pdf.cell(col_w[i], head_h, htxt, align="C")
+    pdf.set_y(y + head_h)
 
     rows = template_fields.get("lesson_rows") or [
         {"phase": "도입", "time": "10분", "content": "복습 및 동기 유발", "remarks": ""},
@@ -99,40 +168,48 @@ def render_week_pdf(template_fields: Dict) -> bytes:
         {"phase": "정리", "time": "10분", "content": "형성평가 및 과제", "remarks": ""},
     ]
 
+    line_h = 6.2
     for row in rows[:8]:
-        p = _safe_text(str(row.get("phase", "")), 40)
-        t = _safe_text(str(row.get("time", "")), 20)
-        c = _chunk_unbroken(_safe_text(str(row.get("content", "")), 260), 30)
-        r = _chunk_unbroken(_safe_text(str(row.get("remarks", "")), 100), 20)
+        values = [
+            str(row.get("phase", "")),
+            str(row.get("time", "")),
+            str(row.get("content", "")),
+            str(row.get("remarks", "")),
+        ]
+        wrapped = [_wrap_text(pdf, values[i], col_w[i] - 4) for i in range(4)]
+        row_h = max(16, line_h * max(len(w) for w in wrapped) + 3)
 
-        start_x, start_y = pdf.get_x(), pdf.get_y()
-        pdf.multi_cell(col_w[0], 8, p, border=1)
-        y_after_phase = pdf.get_y()
+        # Prevent row split mid-table; move to next page safely
+        if pdf.get_y() + row_h > pdf.h - pdf.b_margin:
+            pdf.add_page()
+            section_header("수업계획서 (계속)")
+            x = pdf.l_margin
+            y = pdf.get_y()
+            for i, htxt in enumerate(headers):
+                cx = x + sum(col_w[:i])
+                draw_box(cx, y, col_w[i], head_h)
+                pdf.set_font(fn, style="B", size=11)
+                pdf.set_xy(cx, y)
+                pdf.cell(col_w[i], head_h, htxt, align="C")
+            pdf.set_y(y + head_h)
 
-        pdf.set_xy(start_x + col_w[0], start_y)
-        pdf.multi_cell(col_w[1], 8, t, border=1)
-        y_after_time = pdf.get_y()
+        y = pdf.get_y()
+        x = pdf.l_margin
+        for i in range(4):
+            cx = x + sum(col_w[:i])
+            draw_box(cx, y, col_w[i], row_h)
+            draw_wrapped_text(cx, y, col_w[i], row_h, values[i], bold=(i == 0 and bool(values[i])))
+        pdf.set_y(y + row_h)
 
-        pdf.set_xy(start_x + col_w[0] + col_w[1], start_y)
-        pdf.multi_cell(col_w[2], 8, c, border=1)
-        y_after_content = pdf.get_y()
+    pdf.ln(4)
+    section_header("수업보고서")
+    key_value_row("수업 평가:", template_fields.get("evaluation", ""), row_h=14)
+    key_value_row("학생 특이 사항", template_fields.get("student_notes", ""), row_h=14)
 
-        pdf.set_xy(start_x + col_w[0] + col_w[1] + col_w[2], start_y)
-        pdf.multi_cell(col_w[3], 8, r, border=1)
-        y_after_remark = pdf.get_y()
-
-        pdf.set_xy(start_x, max(y_after_phase, y_after_time, y_after_content, y_after_remark))
-
-    pdf.ln(2)
-    pdf.set_font(fn, size=11)
-    pdf.cell(0, 8, "수업 보고", border=1, new_x="LMARGIN", new_y="NEXT")
-    field_row("평가", template_fields.get("evaluation", ""))
-    field_row("학생 특이사항", template_fields.get("student_notes", ""))
-    field_row("교사 메모", template_fields.get("teacher_notes", ""))
-
-    draft = _chunk_unbroken(_safe_text(template_fields.get("edited_draft", ""), 3000), 35)
-    pdf.set_font(fn, size=9)
-    pdf.multi_cell(0, 6, f"첨부 초안\n{draft}", border=1)
+    teacher_note = template_fields.get("teacher_notes", "")
+    if template_fields.get("edited_draft", ""):
+        teacher_note = f"{teacher_note}\n\n[초안]\n{template_fields.get('edited_draft', '')}".strip()
+    key_value_row("교사 메모", teacher_note, row_h=26)
 
     out = BytesIO()
     out.write(pdf.output())

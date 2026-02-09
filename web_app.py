@@ -171,6 +171,9 @@ def main() -> None:
         st.session_state["teacher_notes"] = class_plan_note
 
     theme_objective = st.text_area("Theme/Objectives", key="theme_objective")
+    lesson_topic = st.text_input("Lesson topic", value=subject)
+    lesson_datetime = st.text_input("Lesson date/time", value=f"{week_info.get('date_range', 'N/A')} / {schedule}")
+    target_group = st.text_input("Target group", value=class_name)
     evaluation = st.text_area("Evaluation", key="evaluation")
     student_notes = st.text_area("Student notes", key="student_notes")
     teacher_notes = st.text_area("Teacher notes", key="teacher_notes")
@@ -203,6 +206,9 @@ def main() -> None:
                 "class_name": class_name,
                 "schedule": schedule,
                 "materials": materials,
+                "lesson_topic": lesson_topic,
+                "lesson_datetime": lesson_datetime,
+                "target_group": target_group,
                 "theme_objective": theme_objective,
                 "evaluation": evaluation,
                 "student_notes": student_notes,
