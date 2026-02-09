@@ -7,16 +7,22 @@ from fpdf.errors import FPDFException
 
 
 def _find_font_path() -> str:
+    local_font = Path(__file__).resolve().parent / "assets" / "fonts" / "NanumGothic.ttf"
     candidates = [
+        str(local_font),
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
     for path in candidates:
         if Path(path).exists():
             return path
     return ""
+
+
+def has_cjk_font() -> bool:
+    return bool(_find_font_path())
 
 
 def _safe_text(text: str, max_len: int = 1500) -> str:

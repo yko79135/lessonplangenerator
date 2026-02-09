@@ -18,7 +18,8 @@ streamlit run web_app.py
 ## Streamlit Cloud deployment
 1. Push this repo as-is.
 2. Ensure `requirements.txt` exists at repo root (already included).
-3. Set app entrypoint to `web_app.py`.
+3. Keep `packages.txt` at repo root so apt can install Korean fonts (`fonts-nanum`) for PDF rendering.
+4. Set app entrypoint to `web_app.py`.
 
 ## Persistence behavior
 - Uploaded PDF files are saved under `data/syllabi/` with unique IDs.
@@ -28,3 +29,4 @@ streamlit run web_app.py
 ## Notes
 - PDF parsing tries `pypdf` first, then `PyPDF2` fallback.
 - PDF export uses fixed sections/table blocks and safe text wrapping/chunking for long lines.
+- For Korean text in exported PDFs, the app looks for Nanum/Noto CJK fonts and falls back gracefully.

@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import streamlit as st
 
 from lessonplan_bot import generate_weekly_draft, parse_syllabus_pdf
-from pdf_template import render_week_pdf
+from pdf_template import has_cjk_font, render_week_pdf
 
 DATA_DIR = Path("data")
 SYLLABI_DIR = DATA_DIR / "syllabi"
@@ -78,6 +78,9 @@ def selected_item_by_label(index: List[Dict], label: str) -> Optional[Dict]:
 def main() -> None:
     st.set_page_config(page_title="Syllabus to Weekly Lesson Plan", layout="wide")
     st.title("Syllabus Library 기반 주간 수업안/보고서 생성기")
+
+    if not has_cjk_font():
+        st.warning("한글 폰트를 찾지 못해 PDF에서 한글이 깨질 수 있습니다. Streamlit Cloud에서는 packages.txt의 fonts-nanum 설치를 확인하세요.")
 
     ensure_storage()
     index = load_index()
