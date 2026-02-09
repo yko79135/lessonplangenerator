@@ -2,3 +2,5 @@ streamlit
 fpdf2
 pypdf
 PyPDF2
+google-api-python-client
+google-auth

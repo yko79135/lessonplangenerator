@@ -30,3 +30,13 @@ streamlit run web_app.py
 - PDF parsing tries `pypdf` first, then `PyPDF2` fallback.
 - PDF export uses fixed sections/table blocks and safe text wrapping/chunking for long lines.
 - For Korean text in exported PDFs, the app looks for Nanum/Noto CJK fonts and falls back gracefully.
+
+## Google Docs upload (shared folder)
+The app can upload the edited draft as a Google Doc to a shared folder.
+
+1. Create a Google Cloud service account and enable **Google Drive API** + **Google Docs API**.
+2. Put service account JSON in Streamlit secrets under `gcp_service_account`.
+3. Share your target folder (or Shared Drive folder) with the service account email as **Editor**.
+4. In app, fill `Google Drive folder ID` and click `Upload as Google Doc`.
+
+> You do **not** need to be domain admin, but the service account must be explicitly added to that shared folder.

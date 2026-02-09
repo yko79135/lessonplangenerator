@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 import streamlit as st
 
 from lessonplan_bot import generate_weekly_draft, parse_syllabus_pdf
+from google_drive_uploader import upload_report_as_google_doc
 from pdf_template import has_cjk_font, render_week_pdf
 
 DATA_DIR = Path("data")
@@ -131,7 +132,7 @@ def main() -> None:
             st.success("삭제되었습니다.")
             st.rerun()
 
-    st.subheader("2) 입력 정보")
+    st.subheader("2) 주차 선택 및 초안 생성")
     weeks = selected.get("weeks", [])
     week_options = [f"Week {w['week_no']} ({w['date_range']})" for w in weeks] or ["Week 1 (N/A)"]
     chosen_week = st.selectbox("Week", week_options)
@@ -144,7 +145,7 @@ def main() -> None:
     with col_a:
         teacher_name = st.text_input("Teacher name", value="고영찬")
         class_name = st.text_input("Class name", value="11A")
-        schedule = st.text_input("Schedule", value=f"{week_info.get('date_range', 'N/A')} / 50분")
+        schedule = st.text_input("Schedule", value=f"{week_info.get('date_range', 'N/A')} / 40분")
     with col_b:
         materials = st.text_input("Materials", value="교재, 활동지, PPT")
         include_prayer = st.checkbox("Include prayer", value=True)
@@ -165,27 +166,38 @@ def main() -> None:
             st.error(f"초안 생성 실패: {exc}")
             st.code(traceback.format_exc())
 
-    draft_text = st.text_area("4) Draft text (편집 가능)", key="draft_text", height=320)
+    st.subheader("3) PDF 문서 양식 순서대로 입력")
+    st.caption("아래 입력 순서는 PDF 결과 문서의 배치 순서(상단 헤더 → 주제/목적 → 수업계획서 → 수업보고서)와 동일합니다.")
 
-    st.subheader("PDF Template Fields")
+    st.markdown("#### 상단 헤더")
+    doc_title = st.text_input("문서 제목", value="주간 수업 계획서 및 보고서")
+    lesson_topic = st.text_input("Lesson topic", value=subject)
+    lesson_datetime = st.text_input("Lesson date/time", value=f"{week_info.get('date_range', 'N/A')} / {schedule}")
+    target_group = st.text_input("Target group", value=class_name)
+    materials = st.text_input("수업 필요 물품 / 준비물", value=materials)
+
+    st.markdown("#### 수업 주제 및 수업 목적")
     if not st.session_state["theme_objective"]:
         st.session_state["theme_objective"] = f"{subject} 핵심 개념 이해 및 적용"
     if not st.session_state["teacher_notes"]:
         st.session_state["teacher_notes"] = class_plan_note
-
     theme_objective = st.text_area("Theme/Objectives", key="theme_objective")
-    lesson_topic = st.text_input("Lesson topic", value=subject)
-    lesson_datetime = st.text_input("Lesson date/time", value=f"{week_info.get('date_range', 'N/A')} / {schedule}")
-    target_group = st.text_input("Target group", value=class_name)
+
+    st.markdown("#### 수업계획서 표")
+    st.caption("한 줄에 `단계|시간|내용|비고` 형식으로 입력하세요.")
+    row_input = st.text_area(
+        "Lesson plan rows (단계|시간|내용|비고 per line)",
+        key="lesson_rows_input",
+        height=140,
+    )
+
+    st.markdown("#### 수업보고서")
     evaluation = st.text_area("Evaluation", key="evaluation")
     student_notes = st.text_area("Student notes", key="student_notes")
     teacher_notes = st.text_area("Teacher notes", key="teacher_notes")
 
-    row_input = st.text_area(
-        "Lesson plan rows (단계|시간|내용|비고 per line)",
-        key="lesson_rows_input",
-        height=120,
-    )
+    st.markdown("#### 첨부 초안 텍스트")
+    draft_text = st.text_area("4) Draft text (편집 가능)", key="draft_text", height=320)
 
     lesson_rows = []
     for line in row_input.splitlines():
@@ -202,7 +214,7 @@ def main() -> None:
     try:
         pdf_bytes = render_week_pdf(
             {
-                "doc_title": "주간 수업안 및 보고서",
+                "doc_title": doc_title,
                 "teacher_name": teacher_name,
                 "subject": subject,
                 "week_label": chosen_week,
@@ -230,7 +242,33 @@ def main() -> None:
         st.error(f"PDF 생성 실패: {exc}")
         st.code(traceback.format_exc())
 
-    st.caption("※ Future upload integrations (e.g., Drive) can be added later.")
+    st.subheader("5) Google Docs 업로드 (Shared Drive/Folder)")
+    st.caption(
+        "공유 폴더 ID를 입력하고 업로드 버튼을 누르면 편집 가능한 Google Docs로 저장합니다. "
+        "서비스 계정 이메일을 해당 공유 폴더에 편집자로 추가해야 합니다."
+    )
+    gdoc_folder_id = st.text_input("Google Drive folder ID", value="")
+    gdoc_title = st.text_input(
+        "Google Doc title",
+        value=f"주간 수업 계획서 및 보고서 - {chosen_week}",
+    )
+    if st.button("Upload as Google Doc"):
+        try:
+            if not draft_text.strip():
+                st.warning("업로드할 초안 텍스트가 없습니다. 먼저 초안을 생성/편집하세요.")
+            else:
+                url = upload_report_as_google_doc(
+                    title=gdoc_title,
+                    body_text=draft_text,
+                    folder_id=gdoc_folder_id,
+                )
+                st.success("Google Doc 업로드 완료")
+                st.markdown(f"[문서 열기]({url})")
+        except Exception as exc:
+            st.error(f"Google Doc 업로드 실패: {exc}")
+            st.code(traceback.format_exc())
+
+    st.caption("※ Google Docs 업로드는 서비스 계정 또는 환경설정이 필요합니다.")
 
 
 if __name__ == "__main__":
