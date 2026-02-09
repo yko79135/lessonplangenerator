@@ -110,11 +110,11 @@ def main() -> None:
     if "theme_objective" not in st.session_state:
         st.session_state["theme_objective"] = ""
     if "evaluation" not in st.session_state:
-        st.session_state["evaluation"] = "학습 목표 달성 여부와 참여도를 확인"
+        st.session_state["evaluation"] = "특이사항 없음"
     if "student_notes" not in st.session_state:
         st.session_state["student_notes"] = "특이사항 없음"
     if "teacher_notes" not in st.session_state:
-        st.session_state["teacher_notes"] = ""
+        st.session_state["teacher_notes"] = "특이사항 없음"
     if "lesson_rows_input" not in st.session_state:
         st.session_state["lesson_rows_input"] = (
             "도입|10분|출석 확인, 지난 시간 복습|집중 유도\n"
@@ -183,19 +183,7 @@ def main() -> None:
         class_name = st.text_input("Class name", value=auto_class_default)
         schedule = st.text_input("Schedule", value=f"{week_info.get('date_range', 'N/A')} / 40분")
     with col_b:
-        materials = st.text_input("Materials", value="교재, 활동지, PPT")
         include_prayer = st.checkbox("Include prayer", value=True)
-
-    if st.button("3) 초안 생성", type="primary"):
-        try:
-            st.session_state["lesson_rows_input"] = generate_lesson_table_rows_text(
-                week_info=week_info,
-                class_plan_note=class_plan_note,
-                include_prayer=include_prayer,
-            )
-        except Exception as exc:
-            st.error(f"초안 생성 실패: {exc}")
-            st.code(traceback.format_exc())
 
     auto = suggest_topic_objective(
         week_info=week_info,
@@ -214,21 +202,28 @@ def main() -> None:
         st.session_state["theme_objective"] = auto.get("theme_objective", f"{subject} 핵심 개념 이해 및 적용")
         st.session_state["last_auto_week_key"] = current_week_key
 
-    st.caption("입력 순서는 PDF 결과 문서의 배치 순서(상단 헤더 → 주제/목적 → 수업계획서 → 수업보고서)와 동일합니다.")
-
-    st.markdown("#### 상단 헤더")
+    st.markdown("### 상단 헤더")
     doc_title = st.text_input("문서 제목", value="주간 수업 계획서 및 보고서")
     lesson_topic = st.text_input("Lesson topic", key="auto_lesson_topic")
     lesson_datetime = st.text_input("Lesson date/time", key="auto_lesson_datetime")
     target_group = st.text_input("Target group", key="auto_target_group")
-    materials = st.text_input("수업 필요 물품 / 준비물", value=materials)
+    materials = st.text_input("수업 필요 물품 / 준비물", value="교재, 활동지, PPT")
 
-    st.markdown("#### 수업 주제 및 수업 목적")
-    if not st.session_state["teacher_notes"]:
-        st.session_state["teacher_notes"] = class_plan_note
+    st.markdown("### 수업 주제 및 수업 목적")
     theme_objective = st.text_area("Theme/Objectives", key="theme_objective")
 
-    st.markdown("#### 수업보고서")
+    if st.button("3) 초안 생성", type="primary"):
+        try:
+            st.session_state["lesson_rows_input"] = generate_lesson_table_rows_text(
+                week_info=week_info,
+                class_plan_note=class_plan_note,
+                include_prayer=include_prayer,
+            )
+        except Exception as exc:
+            st.error(f"초안 생성 실패: {exc}")
+            st.code(traceback.format_exc())
+
+    st.markdown("### 수업보고서")
     evaluation = st.text_area("Evaluation", key="evaluation")
     student_notes = st.text_area("Student notes", key="student_notes")
     teacher_notes = st.text_area("Teacher notes", key="teacher_notes")
