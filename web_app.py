@@ -95,6 +95,41 @@ def selected_item_by_label(index: List[Dict], label: str) -> Optional[Dict]:
     return None
 
 
+def compose_final_report_text(
+    *,
+    doc_title: str,
+    teacher_name: str,
+    subject: str,
+    lesson_datetime: str,
+    target_group: str,
+    materials: str,
+    lesson_topic: str,
+    theme_objective: str,
+    lesson_rows_text: str,
+    evaluation: str,
+    student_notes: str,
+    teacher_notes: str,
+) -> str:
+    return (
+        f"{doc_title}\n\n"
+        f"교사: {teacher_name}\n"
+        f"수업: {subject}\n"
+        f"수업날짜: {lesson_datetime}\n"
+        f"대상: {target_group}\n"
+        f"수업 필요 물품 / 준비물: {materials}\n\n"
+        f"[수업 주제 및 수업 목적]\n"
+        f"수업 주제: {lesson_topic}\n"
+        f"수업 목적: {theme_objective}\n\n"
+        f"[수업계획서]\n"
+        f"(단계|시간|내용|비고)\n"
+        f"{lesson_rows_text}\n\n"
+        f"[수업보고서]\n"
+        f"수업 평가: {evaluation}\n"
+        f"학생 특이 사항: {student_notes}\n"
+        f"교사 메모: {teacher_notes}\n"
+    )
+
+
 def main() -> None:
     st.set_page_config(page_title="Syllabus to Weekly Lesson Plan", layout="wide")
     st.title("Syllabus Library 기반 주간 수업안/보고서 생성기")
@@ -227,7 +262,9 @@ def main() -> None:
     evaluation = st.text_area("Evaluation", key="evaluation")
     student_notes = st.text_area("Student notes", key="student_notes")
     teacher_notes = st.text_area("Teacher notes", key="teacher_notes")
+    evaluation_final = evaluation.strip() or "특이사항 없음"
     student_notes_final = student_notes.strip() or "특이사항 없음"
+    teacher_notes_final = teacher_notes.strip() or "특이사항 없음"
 
     st.markdown("#### 수업계획서 표 (자동 초안, 편집 가능)")
     draft_text = st.text_area(
@@ -263,9 +300,9 @@ def main() -> None:
                 "lesson_datetime": lesson_datetime,
                 "target_group": target_group,
                 "theme_objective": theme_objective,
-                "evaluation": evaluation,
+                "evaluation": evaluation_final,
                 "student_notes": student_notes_final,
-                "teacher_notes": teacher_notes,
+                "teacher_notes": teacher_notes_final,
                 "lesson_rows": lesson_rows,
                 "edited_draft": "",
             }
@@ -295,9 +332,23 @@ def main() -> None:
             if not draft_text.strip():
                 st.warning("업로드할 초안 텍스트가 없습니다. 먼저 초안을 생성/편집하세요.")
             else:
+                report_text = compose_final_report_text(
+                    doc_title=doc_title,
+                    teacher_name=teacher_name,
+                    subject=subject,
+                    lesson_datetime=lesson_datetime,
+                    target_group=target_group,
+                    materials=materials,
+                    lesson_topic=lesson_topic,
+                    theme_objective=theme_objective,
+                    lesson_rows_text=draft_text,
+                    evaluation=evaluation_final,
+                    student_notes=student_notes_final,
+                    teacher_notes=teacher_notes_final,
+                )
                 url = upload_report_as_google_doc(
                     title=gdoc_title,
-                    body_text=draft_text,
+                    body_text=report_text,
                     folder_id=gdoc_folder_id,
                 )
                 st.success("Google Doc 업로드 완료")
