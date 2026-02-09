@@ -82,6 +82,23 @@ def main() -> None:
     ensure_storage()
     index = load_index()
 
+    if "draft_text" not in st.session_state:
+        st.session_state["draft_text"] = ""
+    if "theme_objective" not in st.session_state:
+        st.session_state["theme_objective"] = ""
+    if "evaluation" not in st.session_state:
+        st.session_state["evaluation"] = "학습 목표 달성 여부와 참여도를 확인"
+    if "student_notes" not in st.session_state:
+        st.session_state["student_notes"] = "특이사항 없음"
+    if "teacher_notes" not in st.session_state:
+        st.session_state["teacher_notes"] = ""
+    if "lesson_rows_input" not in st.session_state:
+        st.session_state["lesson_rows_input"] = (
+            "도입|10분|출석 확인, 지난 시간 복습|집중 유도\n"
+            "전개|30분|핵심 내용 설명 및 활동|질의응답\n"
+            "정리|10분|형성평가, 과제 안내|다음 시간 예고"
+        )
+
     st.subheader("1) Syllabus Library")
     up = st.file_uploader("강의계획서 PDF 업로드", type=["pdf"])
     if up is not None:
@@ -145,23 +162,24 @@ def main() -> None:
             st.error(f"초안 생성 실패: {exc}")
             st.code(traceback.format_exc())
 
-    draft_text = st.text_area(
-        "4) Draft text (편집 가능)",
-        value=st.session_state.get("draft_text", ""),
-        height=320,
-    )
-    st.session_state["draft_text"] = draft_text
+    draft_text = st.text_area("4) Draft text (편집 가능)", key="draft_text", height=320)
 
     st.subheader("PDF Template Fields")
-    theme_objective = st.text_area("Theme/Objectives", value=f"{subject} 핵심 개념 이해 및 적용")
-    evaluation = st.text_area("Evaluation", value="학습 목표 달성 여부와 참여도를 확인")
-    student_notes = st.text_area("Student notes", value="특이사항 없음")
-    teacher_notes = st.text_area("Teacher notes", value=class_plan_note)
+    if not st.session_state["theme_objective"]:
+        st.session_state["theme_objective"] = f"{subject} 핵심 개념 이해 및 적용"
+    if not st.session_state["teacher_notes"]:
+        st.session_state["teacher_notes"] = class_plan_note
 
-    default_rows = """도입|10분|출석 확인, 지난 시간 복습|집중 유도
-전개|30분|핵심 내용 설명 및 활동|질의응답
-정리|10분|형성평가, 과제 안내|다음 시간 예고"""
-    row_input = st.text_area("Lesson plan rows (단계|시간|내용|비고 per line)", value=default_rows, height=120)
+    theme_objective = st.text_area("Theme/Objectives", key="theme_objective")
+    evaluation = st.text_area("Evaluation", key="evaluation")
+    student_notes = st.text_area("Student notes", key="student_notes")
+    teacher_notes = st.text_area("Teacher notes", key="teacher_notes")
+
+    row_input = st.text_area(
+        "Lesson plan rows (단계|시간|내용|비고 per line)",
+        key="lesson_rows_input",
+        height=120,
+    )
 
     lesson_rows = []
     for line in row_input.splitlines():
