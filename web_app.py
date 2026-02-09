@@ -199,23 +199,26 @@ def main() -> None:
             st.success("삭제되었습니다.")
             st.rerun()
 
-    st.subheader("2) 주차 선택")
+    st.subheader("2) 주차 선택 및 초안 생성")
     weeks = selected.get("weeks", [])
     week_options = [f"Week {w['week_no']} ({w['date_range']})" for w in weeks] or ["Week 1 (N/A)"]
     chosen_week = st.selectbox("Week", week_options)
     week_info = weeks[week_options.index(chosen_week)] if weeks else {"week_no": 1, "date_range": "N/A", "events": [], "details": ""}
 
     subject_default = selected.get("name", "").split(".")[0] if selected.get("name") else "영어"
-    subject = subject_default or "영어"
-    class_plan_note = "학생 참여형 활동을 강화"
+    subject = st.text_input("Subject", value=subject_default or "영어")
+    class_plan_note = st.text_area("Brief class plan note", value="학생 참여형 활동을 강화")
 
     curriculum_rows = selected.get("curriculum_rows", [])
     auto_class_default = (week_info.get("events") or ["G6"])[0]
 
-    teacher_name = "고영찬"
-    class_name = auto_class_default
-    schedule = f"{week_info.get('date_range', 'N/A')} / 40분"
-    include_prayer = True
+    col_a, col_b = st.columns(2)
+    with col_a:
+        teacher_name = st.text_input("Teacher name", value="고영찬")
+        class_name = st.text_input("Class name", value=auto_class_default)
+        schedule = st.text_input("Schedule", value=f"{week_info.get('date_range', 'N/A')} / 40분")
+    with col_b:
+        include_prayer = st.checkbox("Include prayer", value=True)
 
     auto = suggest_topic_objective(
         week_info=week_info,
@@ -236,18 +239,12 @@ def main() -> None:
 
     st.markdown("### 상단 헤더")
     doc_title = st.text_input("문서 제목", value="주간 수업 계획서 및 보고서")
-    teacher_name = st.text_input("Teacher name", value=teacher_name)
-    subject = st.text_input("Subject", value=subject)
     lesson_topic = st.text_input("Lesson topic", key="auto_lesson_topic")
     lesson_datetime = st.text_input("Lesson date/time", key="auto_lesson_datetime")
     target_group = st.text_input("Target group", key="auto_target_group")
-    class_name = st.text_input("Class name", value=class_name)
-    schedule = st.text_input("Schedule", value=schedule)
-    include_prayer = st.checkbox("Include prayer", value=True)
     materials = st.text_input("수업 필요 물품 / 준비물", value="교재, 활동지, PPT")
 
     st.markdown("### 수업 주제 및 수업 목적")
-    class_plan_note = st.text_area("Brief class plan note", value=class_plan_note)
     theme_objective = st.text_area("Theme/Objectives", key="theme_objective")
 
     if st.button("3) 초안 생성", type="primary"):
