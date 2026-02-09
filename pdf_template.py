@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from fpdf import FPDF
+from fpdf.errors import FPDFException
 
 
 def _find_font_path() -> str:
@@ -64,16 +65,34 @@ class LessonPDF(FPDF):
         super().__init__(orientation="P", unit="mm", format="A4")
         self.set_auto_page_break(auto=True, margin=12)
         self.font_name = "Helvetica"
+        self.font_bold_name = "Helvetica"
         font_path = _find_font_path()
         if font_path:
             self.add_font("AppFont", "", font_path)
             self.font_name = "AppFont"
+            # Many CJK/system font files don't provide a bold variant path.
+            # Keep bold mapped to regular to avoid undefined font style crashes.
+            self.font_bold_name = "AppFont"
 
 
 def render_week_pdf(template_fields: Dict) -> bytes:
     pdf = LessonPDF()
     pdf.add_page()
     fn = pdf.font_name
+    fn_b = pdf.font_bold_name
+
+    def set_font_safe(*, bold: bool, size: int) -> None:
+        """Set font without crashing when bold variant is unavailable for custom fonts."""
+        target_name = fn_b if bold else fn
+        target_style = "" if target_name == "AppFont" else ("B" if bold else "")
+        try:
+            pdf.set_font(target_name, style=target_style, size=size)
+        except FPDFException:
+            # Fallback: same family regular, then built-in Helvetica.
+            try:
+                pdf.set_font(fn, size=size)
+            except FPDFException:
+                pdf.set_font("Helvetica", style="B" if bold else "", size=size)
 
     page_w = pdf.w - pdf.l_margin - pdf.r_margin
 
@@ -81,7 +100,7 @@ def render_week_pdf(template_fields: Dict) -> bytes:
         pdf.rect(x, y, w, h)
 
     def draw_wrapped_text(x: float, y: float, w: float, h: float, text: str, *, size: int = 10, pad: float = 1.8, bold: bool = False) -> None:
-        pdf.set_font(fn, style="B" if bold else "", size=size)
+        set_font_safe(bold=bold, size=size)
         lines = _wrap_text(pdf, text, max_width=max(5.0, w - (pad * 2)))
         line_h = max(5.6, size * 0.45)
         max_lines = max(1, int((h - (pad * 2)) // line_h))
@@ -97,7 +116,7 @@ def render_week_pdf(template_fields: Dict) -> bytes:
         y = pdf.get_y()
         h = 8
         draw_box(x, y, page_w, h)
-        pdf.set_font(fn, style="B", size=12)
+        set_font_safe(bold=True, size=12)
         pdf.set_xy(x, y)
         pdf.cell(page_w, h, _safe_text(text, 120), align="C")
         pdf.set_y(y + h)
@@ -112,7 +131,7 @@ def render_week_pdf(template_fields: Dict) -> bytes:
         draw_wrapped_text(x + lw, y, page_w - lw, row_h, value)
         pdf.set_y(y + row_h)
 
-    pdf.set_font(fn, style="B", size=20)
+    set_font_safe(bold=True, size=20)
     pdf.cell(0, 11, _safe_text(template_fields.get("doc_title", "주간 수업 계획서 및 보고서"), 120), new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(1.5)
 
@@ -157,7 +176,7 @@ def render_week_pdf(template_fields: Dict) -> bytes:
     for i, htxt in enumerate(headers):
         cx = x + sum(col_w[:i])
         draw_box(cx, y, col_w[i], head_h)
-        pdf.set_font(fn, style="B", size=11)
+        set_font_safe(bold=True, size=11)
         pdf.set_xy(cx, y)
         pdf.cell(col_w[i], head_h, htxt, align="C")
     pdf.set_y(y + head_h)
@@ -188,7 +207,7 @@ def render_week_pdf(template_fields: Dict) -> bytes:
             for i, htxt in enumerate(headers):
                 cx = x + sum(col_w[:i])
                 draw_box(cx, y, col_w[i], head_h)
-                pdf.set_font(fn, style="B", size=11)
+                set_font_safe(bold=True, size=11)
                 pdf.set_xy(cx, y)
                 pdf.cell(col_w[i], head_h, htxt, align="C")
             pdf.set_y(y + head_h)
