@@ -22,6 +22,7 @@ from lessonplan_bot import (
     parse_table_rows_text,
     suggest_topic_objective_from_syllabus,
 )
+import lessonplan_bot as lb
 from pdf_template import has_cjk_font, render_week_pdf
 
 DATA_DIR = Path("data")
@@ -256,7 +257,7 @@ def main() -> None:
 
     if st.button("(10) 초안생성", type="primary"):
         try:
-            st.session_state["lesson_rows_input"] = generate_lesson_table_rows_text(
+            st.session_state["lesson_rows_input"] = lb.generate_lesson_table_rows_text(
                 week_info=week_info,
                 class_plan_note=plan_note,
                 include_prayer=True,
