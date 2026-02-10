@@ -11,7 +11,10 @@ import streamlit as st
 
 from google_drive_uploader import (
     GoogleAuthConfigError,
+    build_oauth_authorization_url,
     describe_available_auth_source,
+    describe_available_oauth_client_source,
+    exchange_oauth_code_for_user_credentials,
     upload_report_as_google_doc,
 )
 from lessonplan_bot import (
@@ -176,6 +179,9 @@ def main() -> None:
         "student_notes": "특이사항 없음",
         "teacher_notes": "특이사항 없음",
         "last_week_key": "",
+        "google_oauth_state": "",
+        "google_oauth_authorization_url": "",
+        "google_generated_oauth_user_json": "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -349,20 +355,71 @@ def main() -> None:
         st.error(f"Word 문서 생성 실패: {exc}")
         st.code(traceback.format_exc())
 
-    st.subheader("3) Google Docs 업로드")
+    st.subheader("3) Google Docs 업로드 (OAuth)")
     auth_source = describe_available_auth_source()
+    client_source = describe_available_oauth_client_source()
     if auth_source:
-        st.caption(f"감지된 Google 인증 소스: {auth_source}")
+        st.caption(f"감지된 OAuth 사용자 인증 소스: {auth_source}")
     else:
-        st.warning("Google 인증정보가 아직 없습니다. 아래에 인증 JSON을 붙여넣거나, secrets/env를 설정하세요.")
+        st.warning("OAuth 사용자 인증정보가 없습니다. 아래 OAuth 단계로 생성하거나 JSON을 입력하세요.")
+
+    if client_source:
+        st.caption(f"감지된 OAuth 클라이언트 소스: {client_source}")
+
+    st.markdown("#### OAuth 인증정보 생성(선택)")
+    redirect_uri = st.text_input("OAuth Redirect URI", value="urn:ietf:wg:oauth:2.0:oob")
+    oauth_client_override = st.text_area(
+        "OAuth Client JSON 직접 입력(선택)",
+        value="",
+        height=120,
+        help="Google Cloud에서 발급한 OAuth 클라이언트 JSON을 붙여넣으세요.",
+    )
+
+    col_oauth_1, col_oauth_2 = st.columns(2)
+    with col_oauth_1:
+        if st.button("(A) OAuth 동의 URL 생성"):
+            try:
+                state = str(uuid.uuid4())
+                auth_url = build_oauth_authorization_url(
+                    redirect_uri=redirect_uri,
+                    state=state,
+                    client_json_override=oauth_client_override,
+                )
+                st.session_state["google_oauth_state"] = state
+                st.session_state["google_oauth_authorization_url"] = auth_url
+                st.success("OAuth 동의 URL 생성 완료")
+            except GoogleAuthConfigError as exc:
+                st.error(f"OAuth 설정 오류: {exc}")
+
+    with col_oauth_2:
+        oauth_code = st.text_input("(B) 승인 코드 입력", value="")
+        if st.button("(C) 승인 코드로 인증 JSON 생성"):
+            try:
+                creds = exchange_oauth_code_for_user_credentials(
+                    code=oauth_code,
+                    redirect_uri=redirect_uri,
+                    client_json_override=oauth_client_override,
+                )
+                st.session_state["google_generated_oauth_user_json"] = json.dumps(creds, ensure_ascii=False, indent=2)
+                st.success("OAuth 사용자 인증 JSON 생성 완료")
+            except GoogleAuthConfigError as exc:
+                st.error(f"OAuth 코드 교환 실패: {exc}")
+
+    auth_url = st.session_state.get("google_oauth_authorization_url", "")
+    if auth_url:
+        st.markdown(f"[OAuth 동의 화면 열기]({auth_url})")
+
+    generated_json = st.session_state.get("google_generated_oauth_user_json", "")
+    if generated_json:
+        st.caption("아래 생성된 OAuth 사용자 인증 JSON을 그대로 업로드에 사용할 수 있습니다.")
 
     folder_id = st.text_input("공유 Google Drive folder ID")
     doc_name = st.text_input("Google Doc 제목", value=f"{doc_title} - {week_pick}")
     credential_override = st.text_area(
-        "Google 인증 JSON 직접 입력(선택)",
-        value="",
-        height=140,
-        help="authorized_user 또는 service_account JSON 전체를 붙여넣으면 현재 세션 업로드에 사용됩니다.",
+        "OAuth 사용자 인증 JSON 직접 입력(선택)",
+        value=generated_json,
+        height=160,
+        help="authorized_user JSON 전체를 붙여넣으면 현재 세션 업로드에 사용됩니다.",
     )
 
     if st.button("Upload as Google Doc"):
@@ -377,7 +434,7 @@ def main() -> None:
             st.success("Google Doc 업로드 완료")
             st.markdown(f"[문서 열기]({url})")
         except GoogleAuthConfigError as exc:
-            st.error(f"Google 인증 설정 오류: {exc}")
+            st.error(f"Google OAuth 설정 오류: {exc}")
         except Exception as exc:
             st.error(f"Google Docs 업로드 실패: {exc}")
             st.code(traceback.format_exc())
