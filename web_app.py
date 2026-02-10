@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import importlib
 import streamlit as st
 
 from google_drive_uploader import (
@@ -24,6 +25,16 @@ from lessonplan_bot import (
 )
 import lessonplan_bot as lb
 from pdf_template import has_cjk_font, render_week_pdf
+
+
+
+def _load_lessonplan_bot_module():
+    try:
+        return importlib.import_module("lessonplan_bot")
+    except Exception as exc:
+        st.error(f"lessonplan_bot 로딩 실패: {exc}")
+        st.code(traceback.format_exc())
+        return None
 
 DATA_DIR = Path("data")
 SYLLABI_DIR = DATA_DIR / "syllabi"
@@ -140,6 +151,10 @@ def _get_selected(index: List[Dict], label: str) -> Optional[Dict]:
 
 
 def main() -> None:
+    lb = _load_lessonplan_bot_module()
+    if lb is None:
+        return
+
     st.set_page_config(page_title="주간 수업 계획서 및 보고서 생성기", layout="wide")
     st.title("주간 수업 계획서 및 보고서 생성기")
 
