@@ -1,4 +1,5 @@
 import json
+import re
 import traceback
 import uuid
 from datetime import datetime
@@ -105,6 +106,55 @@ def compose_report_text(fields: Dict, draft_text: str) -> str:
         f"교사메모: {fields.get('teacher_notes', '특이사항 없음')}\n"
     )
 
+def _infer_subject_name(filename: str, week_info: Dict) -> str:
+    stem = Path(filename or "").stem
+    cleaned = re.sub(r"[_\-]+", " ", stem)
+    cleaned = re.sub(r"\b(20\d{2}|\d{1,2}주|syllabus|plan|weekly|week)\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    detail = str(week_info.get("details", ""))
+    subject_hint = re.search(r"(Life\s*Science|Science|Math|English|Social\s*Studies|국어|수학|과학|영어)", f"{cleaned} {detail}", re.IGNORECASE)
+    if subject_hint:
+        token = subject_hint.group(1)
+        return token if re.search(r"[A-Za-z]", token) else token.strip()
+    return cleaned or "Life Science"
+
+
+def _infer_target_grade(week_info: Dict) -> str:
+    search_space = " ".join([str(week_info.get("raw_text", "")), str(week_info.get("details", "")), " ".join(week_info.get("events", []))])
+    m = re.search(r"\bG\s*\d{1,2}\b", search_space, re.IGNORECASE)
+    if m:
+        return re.sub(r"\s+", "", m.group(0).upper())
+
+    ev = week_info.get("events", [])
+    if ev:
+        m2 = re.search(r"\d+", str(ev[0]))
+        if m2:
+            return f"G{m2.group(0)}"
+    return "G6"
+
+
+def _infer_week_class_dates(week_info: Dict) -> str:
+    search_space = " ".join([str(week_info.get("raw_text", "")), str(week_info.get("details", ""))])
+    mmdd = re.findall(r"(?<!\d)(\d{1,2})[./-](\d{1,2})(?!\d)", search_space)
+    if mmdd:
+        seen = []
+        for mm, dd in mmdd:
+            token = f"{int(mm)}.{int(dd)}"
+            if token not in seen:
+                seen.append(token)
+        return ", ".join(seen[:4])
+
+    dr = str(week_info.get("date_range", ""))
+    dr_mmdd = re.findall(r"(\d{1,2})[./-](\d{1,2})", dr)
+    if len(dr_mmdd) >= 2:
+        return ", ".join([f"{int(dr_mmdd[0][0])}.{int(dr_mmdd[0][1])}", f"{int(dr_mmdd[1][0])}.{int(dr_mmdd[1][1])}"])
+
+    inferred = infer_lesson_datetime(week_info)
+    inferred_mmdd = re.findall(r"(\d{1,2})\.(\d{1,2})", inferred)
+    if inferred_mmdd:
+        return ", ".join([f"{int(m)}.{int(d)}" for m, d in inferred_mmdd[:4]])
+    return inferred or "2.24, 2.26"
 
 def _label(item: Dict) -> str:
     return f"{item.get('name')} ({item.get('uploaded_at')})"
