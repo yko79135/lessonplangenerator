@@ -18,7 +18,6 @@ from lessonplan_bot import (
     generate_lesson_table_rows_text,
     infer_class_dates_from_week,
     normalize_table_rows,
-    parse_curriculum_sheet,
     parse_syllabus_pdf,
     parse_table_rows_text,
     suggest_topic_objective_from_syllabus,
@@ -241,11 +240,10 @@ def main() -> None:
     auto_subject = _infer_subject_name(selected.get("name", ""), week_info)
     auto_datetime = infer_class_dates_from_week(week_info)
     auto_target = _infer_target_grade(week_info)
-    inferred = suggest_topic_objective(
+    inferred = suggest_topic_objective_from_syllabus(
         week_info=week_info,
-        class_name=class_for_mapping,
         subject=auto_subject,
-        curriculum_rows=selected.get("curriculum_rows", []),
+        outline_map=selected.get("outline_map", {}),
     )
 
     week_key = f"{selected.get('id')}::{week_info.get('week_no')}::{class_for_mapping}"
