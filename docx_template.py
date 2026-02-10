@@ -1,13 +1,25 @@
 from io import BytesIO
-from typing import Dict
+from typing import Dict, Iterable, Optional, Sequence, Tuple
 
 from docx import Document
+from docx.enum.table import WD_ROW_HEIGHT_RULE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
 
 from lessonplan_bot import normalize_table_rows
+
+# Layout constants chosen to keep DOCX frame stable and close to the PDF proportions.
+TABLE_LEFT_INDENT_TWIPS = 360
+TABLE_WIDTH_TWIPS = 9000
+DEFAULT_CELL_MARGINS_TWIPS = (96, 96, 96, 96)  # top, right, bottom, left
+
+HEADER_INFO_COL_WIDTHS = [4500, 4500]
+MATERIALS_COL_WIDTHS = [1900, 7100]
+TOPIC_COL_WIDTHS = [9000]
+PLAN_COL_WIDTHS = [1500, 1100, 4700, 1700]
+REPORT_COL_WIDTHS = [1900, 7100]
 
 
 def _safe_text(value: str, fallback: str = "") -> str:
@@ -45,7 +57,6 @@ def render_week_docx(fields: Dict) -> bytes:
     title_run.font.size = Pt(20)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
-    # Header blocks (2 columns) to mirror the PDF layout.
     info_table = document.add_table(rows=1, cols=2)
     info_table.style = "Table Grid"
     _set_table_left_indent(info_table)
@@ -108,6 +119,11 @@ def render_week_docx(fields: Dict) -> bytes:
         _set_cell_text(cells[1], row.get("time", ""), align_center=True)
         _set_cell_text(cells[2], row.get("content", ""))
         _set_cell_text(cells[3], row.get("remarks", ""))
+
+    _apply_col_widths_to_new_rows(plan_table, PLAN_COL_WIDTHS)
+
+    for body_row in plan_table.rows[1:]:
+        _set_row_height(body_row, 760)
 
     document.add_paragraph()
 
