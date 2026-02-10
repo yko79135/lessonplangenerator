@@ -18,7 +18,6 @@ from lessonplan_bot import (
     generate_lesson_table_rows_text,
     infer_class_dates_from_week,
     normalize_table_rows,
-    parse_curriculum_sheet,
     parse_syllabus_pdf,
     parse_table_rows_text,
     suggest_topic_objective_from_syllabus,
