@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
@@ -52,6 +52,12 @@ def _client_payload_from_json_string(raw_json: str) -> Dict:
     if not isinstance(parsed, dict):
         raise GoogleAuthConfigError("OAuth 클라이언트 JSON 형식이 올바르지 않습니다.")
 
+    if parsed.get("type") == "authorized_user":
+        raise GoogleAuthConfigError(
+            "OAuth Client JSON 자리에는 authorized_user JSON을 넣을 수 없습니다. "
+            "Google Cloud Console > APIs & Services > Credentials에서 다운로드한 OAuth 클라이언트 JSON(web/installed)을 사용하세요."
+        )
+
     if "installed" in parsed and isinstance(parsed["installed"], dict):
         return parsed["installed"]
     if "web" in parsed and isinstance(parsed["web"], dict):
@@ -81,8 +87,19 @@ def describe_available_oauth_client_source() -> str:
     return ""
 
 
-def _read_credentials_payload(credential_json_override: Optional[str] = None) -> Dict:
+def _normalize_authorized_user_payload(payload: Dict) -> Dict:
+    if payload.get("type") == "authorized_user" and isinstance(payload.get("data"), dict):
+        return {"type": "authorized_user", "data": payload["data"]}
+    if payload.get("type") == "authorized_user":
+        return {"type": "authorized_user", "data": payload}
+    return {"type": "authorized_user", "data": payload}
+
+
+def _read_credentials_payload(credential_json_override: Optional[Union[str, Dict]] = None) -> Dict:
     """Prefer in-app override, then OAuth user JSON."""
+    if isinstance(credential_json_override, dict):
+        return _normalize_authorized_user_payload(credential_json_override)
+
     if (credential_json_override or "").strip():
         return _payload_from_json_string(credential_json_override.strip())
 
@@ -201,7 +218,7 @@ def exchange_oauth_code_for_user_credentials(
     return user_creds
 
 
-def _build_google_services(credential_json_override: Optional[str] = None):
+def _build_google_services(credential_json_override: Optional[Union[str, Dict]] = None):
     from googleapiclient.discovery import build
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -235,7 +252,13 @@ def _friendly_http_error(exc: Exception) -> GoogleAuthConfigError:
     return GoogleAuthConfigError(f"Google API 요청 실패({status}): {exc}")
 
 
-def upload_report_as_google_doc(*, title: str, body_text: str, folder_id: str, credential_json_override: str = "") -> str:
+def upload_report_as_google_doc(
+    *,
+    title: str,
+    body_text: str,
+    folder_id: str,
+    credential_json_override: Optional[Union[str, Dict]] = "",
+) -> str:
     docs_service, drive_service = _build_google_services(credential_json_override or None)
 
     try:
