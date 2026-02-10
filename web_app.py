@@ -199,22 +199,26 @@ def main() -> None:
             st.success("삭제되었습니다.")
             st.rerun()
 
-    st.subheader("2) 초안생성")
+    st.subheader("2) 주차 선택 및 초안 생성")
     weeks = selected.get("weeks", [])
     week_options = [f"Week {w['week_no']} ({w['date_range']})" for w in weeks] or ["Week 1 (N/A)"]
     chosen_week = st.selectbox("Week", week_options)
     week_info = weeks[week_options.index(chosen_week)] if weeks else {"week_no": 1, "date_range": "N/A", "events": [], "details": ""}
 
     subject_default = selected.get("name", "").split(".")[0] if selected.get("name") else "영어"
-    subject = subject_default or "영어"
-    class_plan_note = "학생 참여형 활동을 강화"
+    subject = st.text_input("Subject", value=subject_default or "영어")
+    class_plan_note = st.text_area("Brief class plan note", value="학생 참여형 활동을 강화")
+
     curriculum_rows = selected.get("curriculum_rows", [])
     auto_class_default = (week_info.get("events") or ["G6"])[0]
 
-    teacher_name = "고영찬"
-    class_name = auto_class_default
-    schedule = f"{week_info.get('date_range', 'N/A')} / 40분"
-    include_prayer = True
+    col_a, col_b = st.columns(2)
+    with col_a:
+        teacher_name = st.text_input("Teacher name", value="고영찬")
+        class_name = st.text_input("Class name", value=auto_class_default)
+        schedule = st.text_input("Schedule", value=f"{week_info.get('date_range', 'N/A')} / 40분")
+    with col_b:
+        include_prayer = st.checkbox("Include prayer", value=True)
 
     auto = suggest_topic_objective(
         week_info=week_info,
@@ -233,19 +237,17 @@ def main() -> None:
         st.session_state["theme_objective"] = auto.get("theme_objective", f"{subject} 핵심 개념 이해 및 적용")
         st.session_state["last_auto_week_key"] = current_week_key
 
-    doc_title = st.text_input("문서제목", value="주간 수업 계획서 및 보고서")
-    teacher_name = st.text_input("교사", value=teacher_name)
-    subject = st.text_input("수업", value=subject)
-    lesson_datetime = st.text_input("수업날짜", key="auto_lesson_datetime")
-    target_group = st.text_input("대상", key="auto_target_group")
-    materials = st.text_input("수업 필요물품/준비물", value="교재, 활동지, PPT")
-    lesson_topic = st.text_input("수업주제", key="auto_lesson_topic")
-    theme_objective = st.text_area("수업목적", key="theme_objective")
+    st.markdown("### 상단 헤더")
+    doc_title = st.text_input("문서 제목", value="주간 수업 계획서 및 보고서")
+    lesson_topic = st.text_input("Lesson topic", key="auto_lesson_topic")
+    lesson_datetime = st.text_input("Lesson date/time", key="auto_lesson_datetime")
+    target_group = st.text_input("Target group", key="auto_target_group")
+    materials = st.text_input("수업 필요 물품 / 준비물", value="교재, 활동지, PPT")
 
-    st.markdown("#### 수업계획서 (도입|시간|내용|비고 / 전개|시간|내용|비고 / 정리|시간|내용|비고)")
-    class_plan_note = st.text_area("수업계획서 메모", value=class_plan_note)
+    st.markdown("### 수업 주제 및 수업 목적")
+    theme_objective = st.text_area("Theme/Objectives", key="theme_objective")
 
-    if st.button("초안생성", type="primary"):
+    if st.button("3) 초안 생성", type="primary"):
         try:
             st.session_state["lesson_rows_input"] = generate_lesson_table_rows_text(
                 week_info=week_info,
@@ -256,29 +258,25 @@ def main() -> None:
             st.error(f"초안 생성 실패: {exc}")
             st.code(traceback.format_exc())
 
+    st.markdown("### 수업보고서")
+    evaluation = st.text_area("Evaluation", key="evaluation")
+    student_notes = st.text_area("Student notes", key="student_notes")
+    teacher_notes = st.text_area("Teacher notes", key="teacher_notes")
+    evaluation_final = evaluation.strip() or "특이사항 없음"
+    student_notes_final = student_notes.strip() or "특이사항 없음"
+    teacher_notes_final = teacher_notes.strip() or "특이사항 없음"
+
+    st.markdown("#### 수업계획서 표 (자동 초안, 편집 가능)")
     draft_text = st.text_area(
-        "생성된 초안 (편집 가능)",
+        "수업계획서 표 원문 (TXT 다운로드용)",
         key="lesson_rows_input",
         height=220,
         help="초안 생성 시 수업계획서 표(도입/전개/마무리) 내용만 자동 작성됩니다.",
     )
 
-    evaluation = st.text_area("수업평가", key="evaluation")
-    student_notes = st.text_area("학생특이사항", key="student_notes")
-    teacher_notes = st.text_area("교사메모", key="teacher_notes")
-    evaluation_final = evaluation.strip() or "특이사항 없음"
-    student_notes_final = student_notes.strip() or "특이사항 없음"
-    teacher_notes_final = teacher_notes.strip() or "특이사항 없음"
-
     lesson_rows = []
     for line in draft_text.splitlines():
         if not line.strip():
-            continue
-        if "|" not in line and lesson_rows:
-            prev = lesson_rows[-1]
-            extra = line.strip()
-            prev_content = str(prev.get("content", "")).strip()
-            prev["content"] = f"{prev_content} {extra}".strip()
             continue
         parts = [p.strip() for p in line.split("|")]
         while len(parts) < 4:
@@ -295,7 +293,7 @@ def main() -> None:
                 "teacher_name": teacher_name,
                 "subject": subject,
                 "week_label": chosen_week,
-                "class_name": target_group,
+                "class_name": class_name,
                 "schedule": schedule,
                 "materials": materials,
                 "lesson_topic": lesson_topic,
@@ -319,7 +317,7 @@ def main() -> None:
         st.error(f"PDF 생성 실패: {exc}")
         st.code(traceback.format_exc())
 
-    st.subheader("3) Google Docs 업로드")
+    st.subheader("5) Google Docs 업로드 (Shared Drive/Folder)")
     st.caption(
         "공유 폴더 ID를 입력하고 업로드 버튼을 누르면 편집 가능한 Google Docs로 저장합니다. "
         "서비스 계정 이메일을 해당 공유 폴더에 편집자로 추가해야 합니다."

@@ -264,7 +264,7 @@ def generate_lesson_table_rows_text(
     details = (week_info.get("details") or "핵심 단원 학습").strip()
     events = ", ".join(week_info.get("events", [])) or "해당 반 활동"
     intro = "기도와 출석 확인, 지난 시간 복습" if include_prayer else "출석 확인, 지난 시간 복습"
-    develop = f"{details} 중심 설명 및 활동 / 대상: {events} / 활동: {class_plan_note or '개념 확인 활동'}"
+    develop = f"{details} 중심 설명 및 활동\n- 대상: {events}\n- 활동: {class_plan_note or '개념 확인 활동'}"
     close = "형성평가, 과제 안내, 다음 시간 예고"
 
     return (
