@@ -24,6 +24,7 @@ from lessonplan_bot import (
 )
 import lessonplan_bot as lb
 from pdf_template import has_cjk_font, render_week_pdf
+from docx_template import render_week_docx
 
 
 
@@ -334,6 +335,18 @@ def main() -> None:
         )
     except Exception as exc:
         st.error(f"PDF 생성 실패: {exc}")
+        st.code(traceback.format_exc())
+
+    try:
+        docx_bytes = render_week_docx(fields)
+        st.download_button(
+            "Download Word (.docx)",
+            data=docx_bytes,
+            file_name=f"week_{week_info.get('week_no', 1)}_report.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+    except Exception as exc:
+        st.error(f"Word 문서 생성 실패: {exc}")
         st.code(traceback.format_exc())
 
     st.subheader("3) Google Docs 업로드")
