@@ -167,8 +167,7 @@ def suggest_topic_objective(*, week_info: Dict, class_name: str, subject: str, c
 def generate_lesson_table_rows_text(*, week_info: Dict, class_plan_note: str, include_prayer: bool) -> str:
     intro = "기도 및 출석 확인, 지난 시간 복습" if include_prayer else "출석 확인, 지난 시간 복습"
     develop_seed = str(week_info.get("details") or "핵심 단원 학습")[:100]
-    # Keep each table row as a single line so it won't be parsed into accidental extra rows.
-    develop = f"{develop_seed} 설명 및 활동 (메모: {class_plan_note or '개념 확인 활동'})"
+    develop = f"{develop_seed} 설명 및 활동\n- 메모: {class_plan_note or '개념 확인 활동'}"
     return (
         f"도입|10분|{intro}|집중 유도\n"
         f"전개|25분|{develop}|질의응답\n"
@@ -182,8 +181,7 @@ def parse_table_rows_text(text: str) -> List[Dict[str, str]]:
         line = raw_line.strip()
         if not line:
             continue
-        # Continuation rule: lines without a full 4-column row are appended to previous row content.
-        if "|" not in line or line.count("|") < 3:
+        if "|" not in line:
             if rows:
                 rows[-1]["content"] = (rows[-1]["content"] + "\n" + line).strip()
             else:
