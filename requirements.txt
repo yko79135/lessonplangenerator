@@ -5,3 +5,4 @@ PyPDF2
 google-api-python-client
 google-auth
 python-docx
+requests-oauthlib

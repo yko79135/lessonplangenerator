@@ -6,7 +6,7 @@
 - `web_app.py`: Streamlit UI 및 전체 사용자 플로우
 - `lessonplan_bot.py`: PDF 주차/아웃라인 파싱, 표 초안 생성
 - `pdf_template.py`: fpdf2 기반 고정 템플릿 렌더러 (`render_week_pdf(fields) -> bytes`)
-- `google_drive_uploader.py`: Google Docs/Drive 업로드 유틸 (lazy import)
+- `google_drive_uploader.py`: OAuth 기반 Google Docs/Drive 업로드 유틸 (lazy import)
 - `requirements.txt`: 루트 의존성 파일
 - `packages.txt`: Streamlit Cloud용 시스템 패키지(한글 폰트)
 
@@ -36,29 +36,30 @@ streamlit run web_app.py
 - Google Doc으로 전체 보고서 업로드 및 폴더 이동
 
 ## Google Docs 업로드 설정
-앱은 아래 순서로 인증 정보를 찾습니다.
+앱은 OAuth 사용자 인증(`authorized_user`)만 사용합니다.
 
-1. `GOOGLE_OAUTH_USER_JSON` 또는 Streamlit secrets `gcp_oauth_user` (권장)
-2. `GOOGLE_SERVICE_ACCOUNT_JSON` 또는 Streamlit secrets `gcp_service_account` (대안)
+인증 정보 로딩 순서:
+1. `GOOGLE_OAUTH_USER_JSON` 또는 Streamlit secrets `gcp_oauth_user`
+2. 앱 UI의 `OAuth 사용자 인증 JSON 직접 입력(선택)`
 
-3. 앱 UI의 `Google 인증 JSON 직접 입력(선택)`에 JSON을 붙여넣기 (세션 한정)
+OAuth 클라이언트(JSON) 로딩 순서:
+1. `GOOGLE_OAUTH_CLIENT_JSON` 또는 Streamlit secrets `gcp_oauth_client`
+2. 앱 UI의 `OAuth Client JSON 직접 입력(선택)`
 
-### OAuth 사용자 인증(권장)
-- 개인 사용자 권한으로 문서를 생성/이동합니다.
-- 대상 공유 폴더에 사용자가 접근 권한이 있어야 합니다.
-- 앱 내 JSON 입력을 쓸 경우 `authorized_user` 형식(JSON 전체)을 그대로 붙여넣으면 됩니다.
-
-### 서비스 계정 인증
-- 폴더 관리자가 서비스 계정 이메일을 해당 폴더에 **편집자(Editor)** 로 공유해야 합니다.
-- 관리자 권한 자체는 필요하지 않지만, 폴더 공유는 필수입니다.
+### OAuth 인증 생성 절차(앱 내)
+1. `OAuth Client JSON`을 입력하거나 secrets/env로 설정
+2. `(A) OAuth 동의 URL 생성` 클릭
+3. 생성된 링크에서 Google 계정 동의 후 승인 코드 확보
+4. `(C) 승인 코드로 인증 JSON 생성` 클릭
+5. 생성된 `authorized_user` JSON으로 업로드
 
 ### 업로드 오류 트러블슈팅
 - `403 The caller does not have permission`
-  - Google Cloud에서 **Google Docs API**와 **Google Drive API**가 활성화되어 있는지 확인
-  - 서비스 계정 사용 시, 대상 폴더를 서비스 계정 이메일에 Editor로 공유
-  - 조직(Workspace) 정책에서 외부 앱/서비스 계정 API 호출을 차단하지 않았는지 확인
+  - Google Cloud에서 **Google Docs API**와 **Google Drive API** 활성화 확인
+  - OAuth 로그인한 계정이 대상 폴더 접근 권한을 가지고 있는지 확인
+  - 조직(Workspace) 정책에서 Docs/Drive API 호출을 차단하지 않았는지 확인
 - `401 Unauthorized`
-  - OAuth/서비스 계정 인증 JSON이 만료·폐기되지 않았는지 확인하고 재발급 후 재설정
+  - OAuth 인증정보가 만료·폐기되었는지 확인하고 인증 JSON을 재생성
 
 ## 안정성 메모
 - PDF 텍스트 추출은 `pypdf` 우선, 실패 시 `PyPDF2` fallback
