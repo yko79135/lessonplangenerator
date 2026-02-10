@@ -5,6 +5,8 @@ from typing import Dict, List
 from fpdf import FPDF
 from fpdf.errors import FPDFException
 
+from lessonplan_bot import normalize_table_rows
+
 
 def _find_font_path() -> str:
     local_font = Path(__file__).resolve().parent / "assets" / "fonts" / "NanumGothic.ttf"
@@ -187,14 +189,14 @@ def render_week_pdf(template_fields: Dict) -> bytes:
         pdf.cell(col_w[i], head_h, htxt, align="C")
     pdf.set_y(y + head_h)
 
-    rows = template_fields.get("lesson_rows") or [
+    rows = normalize_table_rows(template_fields.get("lesson_rows")) or [
         {"phase": "도입", "time": "10분", "content": "복습 및 동기 유발", "remarks": ""},
         {"phase": "전개", "time": "30분", "content": "핵심 개념 및 활동", "remarks": ""},
         {"phase": "정리", "time": "10분", "content": "형성평가 및 과제", "remarks": ""},
     ]
 
     line_h = 6.2
-    for row in rows[:8]:
+    for row in rows:
         values = [
             str(row.get("phase", "")),
             str(row.get("time", "")),

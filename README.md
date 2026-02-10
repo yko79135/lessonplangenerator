@@ -4,7 +4,7 @@
 
 ## 필수 파일 구성
 - `web_app.py`: Streamlit UI 및 전체 사용자 플로우
-- `lessonplan_bot.py`: PDF 주차 파싱, 커리큘럼 매핑, 표 초안 생성
+- `lessonplan_bot.py`: PDF 주차/아웃라인 파싱, 표 초안 생성
 - `pdf_template.py`: fpdf2 기반 고정 템플릿 렌더러 (`render_week_pdf(fields) -> bytes`)
 - `google_drive_uploader.py`: Google Docs/Drive 업로드 유틸 (lazy import)
 - `requirements.txt`: 루트 의존성 파일
@@ -25,15 +25,14 @@ streamlit run web_app.py
 ## 데이터 영속성
 - 강의계획서 PDF 저장 경로: `data/syllabi/`
 - 라이브러리 인덱스: `data/syllabi_index.json`
-- 선택 업로드한 커리큘럼 파일(`.xlsx/.xls/.csv`)도 동일 디렉토리에 저장되며, 인덱스에 경로가 기록됩니다.
 
 ## 기능 요약
 - 주차 파싱: `1주 2.23-2.27 ... 11A, 11B` 같은 한국형 패턴 파싱
 - 주차 선택 후 자동 기본값 추론:
   - 수업 / 수업날짜 / 대상
-  - 수업주제 / 수업목적(커리큘럼 파일 우선)
+  - 수업주제 / 수업목적(강의계획서 본문 + 아웃라인 코드 매핑 기반)
 - `초안생성`은 **수업계획서 표 행(단계|시간|내용|비고)** 만 생성
-- 초안 텍스트 편집 후 TXT/PDF 다운로드
+- 초안 텍스트 편집 후 `(11-1) 수정 내용 반영`을 눌러 TXT/PDF/Google Docs에 동일 반영
 - Google Doc으로 전체 보고서 업로드 및 폴더 이동
 
 ## Google Docs 업로드 설정
@@ -42,9 +41,12 @@ streamlit run web_app.py
 1. `GOOGLE_OAUTH_USER_JSON` 또는 Streamlit secrets `gcp_oauth_user` (권장)
 2. `GOOGLE_SERVICE_ACCOUNT_JSON` 또는 Streamlit secrets `gcp_service_account` (대안)
 
+3. 앱 UI의 `Google 인증 JSON 직접 입력(선택)`에 JSON을 붙여넣기 (세션 한정)
+
 ### OAuth 사용자 인증(권장)
 - 개인 사용자 권한으로 문서를 생성/이동합니다.
 - 대상 공유 폴더에 사용자가 접근 권한이 있어야 합니다.
+- 앱 내 JSON 입력을 쓸 경우 `authorized_user` 형식(JSON 전체)을 그대로 붙여넣으면 됩니다.
 
 ### 서비스 계정 인증
 - 폴더 관리자가 서비스 계정 이메일을 해당 폴더에 **편집자(Editor)** 로 공유해야 합니다.
