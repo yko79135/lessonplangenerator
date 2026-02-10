@@ -17,6 +17,7 @@ from lessonplan_bot import (
     generate_lesson_table_rows_text,
     infer_class_dates_from_week,
     normalize_table_rows,
+    parse_curriculum_sheet,
     parse_syllabus_pdf,
     parse_table_rows_text,
     suggest_topic_objective_from_syllabus,
@@ -224,10 +225,11 @@ def main() -> None:
     auto_subject = _infer_subject_name(selected.get("name", ""), week_info)
     auto_datetime = infer_class_dates_from_week(week_info)
     auto_target = _infer_target_grade(week_info)
-    inferred = suggest_topic_objective_from_syllabus(
+    inferred = suggest_topic_objective(
         week_info=week_info,
+        class_name=class_for_mapping,
         subject=auto_subject,
-        outline_map=selected.get("outline_map", {}),
+        curriculum_rows=selected.get("curriculum_rows", []),
     )
 
     week_key = f"{selected.get('id')}::{week_info.get('week_no')}::{class_for_mapping}"
@@ -297,10 +299,10 @@ def main() -> None:
         "evaluation": evaluation.strip() or "특이사항 없음",
         "student_notes": (student_notes or "").strip() or "특이사항 없음",
         "teacher_notes": teacher_notes.strip() or "특이사항 없음",
-        "lesson_rows": normalize_table_rows(parse_table_rows_text(export_draft_text)),
+        "lesson_rows": normalize_table_rows(parse_table_rows_text(draft_text)),
     }
 
-    full_txt = compose_report_text(fields, export_draft_text)
+    full_txt = compose_report_text(fields, draft_text)
     st.download_button(
         "Download TXT",
         data=full_txt.encode("utf-8"),
