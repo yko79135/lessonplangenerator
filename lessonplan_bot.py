@@ -1,4 +1,3 @@
-import csv
 import re
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
@@ -23,6 +22,7 @@ WEEK_RE = re.compile(
     r"(?m)^\s*(?P<week_no>\d{1,2})\s*주\s*(?P<date_range>\d{1,2}[./]\d{1,2}\s*[-~]\s*\d{1,2}[./]\d{1,2})(?P<tail>.*)$"
 )
 CLASS_RE = re.compile(r"\b(?:\d{1,2}[A-Za-z]|[A-Za-z]{1,3}\d{1,2})\b")
+SUBSECTION_CODE_RE = re.compile(r"\b(?P<code>\d{1,2}[A-Za-z])\b")
 YEAR_RE = re.compile(r"\b(20\d{2})\b")
 HOLIDAY_RE = re.compile(r"휴강|공휴일|대체휴일|행사|시험")
 DATE_DAY_RE = re.compile(r"(\d{1,2})[./-](\d{1,2})\s*\(?([월화수목금토일])\)?")
@@ -57,6 +57,72 @@ def _extract_pdf_text(path: Path) -> str:
     raise RuntimeError("PDF 텍스트 추출 실패: " + " | ".join(errors))
 
 
+def _clean_outline_title(text: str) -> str:
+    t = re.sub(r"\s+", " ", (text or "")).strip(" -|:\t")
+    t = re.sub(r"\s+\d{1,3}$", "", t)
+    return t.strip()
+
+
+def _looks_like_outline_title(text: str) -> bool:
+    if not text:
+        return False
+    if re.search(r"\b\d{1,2}[./-]\d{1,2}\b", text):
+        return False
+    if re.search(r"\b\d+주\b", text):
+        return False
+    if not re.search(r"[A-Za-z가-힣]", text):
+        return False
+    if len(text) < 2:
+        return False
+    return True
+
+
+def extract_outline_code_title_map(text: str) -> Dict[str, str]:
+    """Extract subsection code->title mapping from syllabus outline/table-of-contents text."""
+    mapping: Dict[str, str] = {}
+    lines = [ln.strip() for ln in (text or "").replace("\r", "\n").split("\n")]
+
+    for idx, line in enumerate(lines):
+        if not line:
+            continue
+
+        code_matches = list(SUBSECTION_CODE_RE.finditer(line))
+        if not code_matches:
+            continue
+
+        for i, match in enumerate(code_matches):
+            code = match.group("code").upper()
+            start = match.end()
+            end = code_matches[i + 1].start() if i + 1 < len(code_matches) else len(line)
+            raw_title = _clean_outline_title(line[start:end])
+
+            if not raw_title:
+                next_line = lines[idx + 1].strip() if idx + 1 < len(lines) else ""
+                if next_line and not SUBSECTION_CODE_RE.search(next_line):
+                    raw_title = _clean_outline_title(next_line)
+
+            if _looks_like_outline_title(raw_title) and code not in mapping:
+                mapping[code] = raw_title
+
+    return mapping
+
+
+def extract_week_subsection_codes(week_info: Dict) -> List[str]:
+    search_space = " ".join(
+        [
+            str(week_info.get("raw_text", "")),
+            str(week_info.get("details", "")),
+            " ".join(week_info.get("events", [])),
+        ]
+    )
+    codes: List[str] = []
+    for m in SUBSECTION_CODE_RE.finditer(search_space):
+        code = m.group("code").upper()
+        if code not in codes:
+            codes.append(code)
+    return codes
+
+
 def parse_weeks_from_text(text: str) -> List[WeekInfo]:
     cleaned = "\n".join(line.rstrip() for line in text.splitlines() if line.strip())
     matches = list(WEEK_RE.finditer(cleaned))
@@ -86,45 +152,13 @@ def parse_weeks_from_text(text: str) -> List[WeekInfo]:
     return weeks
 
 
-def parse_syllabus_pdf(pdf_path: Path) -> List[Dict]:
-    return [w.to_dict() for w in parse_weeks_from_text(_extract_pdf_text(pdf_path))]
-
-
-def parse_curriculum_sheet(path: Path) -> List[Dict]:
-    rows: List[Dict] = []
-    if path.suffix.lower() == ".csv":
-        with path.open("r", encoding="utf-8-sig", newline="") as f:
-            rows = [dict(r) for r in csv.DictReader(f)]
-    elif path.suffix.lower() in {".xlsx", ".xls"}:
-        import pandas as pd  # type: ignore
-
-        rows = pd.read_excel(path).fillna("").to_dict(orient="records")
-    else:
-        return []
-
-    normalized: List[Dict] = []
-    for row in rows:
-        lower = {str(k).strip().lower(): str(v).strip() for k, v in row.items()}
-
-        def pick(*keys: str) -> str:
-            for k in keys:
-                if lower.get(k):
-                    return lower[k]
-            return ""
-
-        week_raw = pick("week", "week_no", "주차")
-        week_match = re.search(r"\d+", week_raw)
-        normalized.append(
-            {
-                "week_no": int(week_match.group(0)) if week_match else None,
-                "class_name": pick("class", "반", "분반", "target", "target group", "class_name"),
-                "topic": pick("topic", "수업 주제", "주제"),
-                "objective": pick("objective", "수업 목적", "목적"),
-                "details": pick("details", "내용", "비고", "description"),
-            }
-        )
-
-    return [r for r in normalized if any(r.values())]
+def parse_syllabus_pdf(pdf_path: Path) -> Dict:
+    text = _extract_pdf_text(pdf_path)
+    return {
+        "weeks": [w.to_dict() for w in parse_weeks_from_text(text)],
+        "outline_map": extract_outline_code_title_map(text),
+        "raw_text": text[:50000],
+    }
 
 
 def infer_lesson_datetime(week_info: Dict) -> str:
@@ -196,18 +230,59 @@ def suggest_topic_objective(*, week_info: Dict, class_name: str, subject: str, c
     week_no = int(week_info.get("week_no") or 0)
     class_norm = class_name.strip().lower()
 
-    for row in curriculum_rows:
-        if int(row.get("week_no") or 0) != week_no:
-            continue
-        row_class = str(row.get("class_name") or "").strip().lower()
-        if row_class and class_norm and row_class != class_norm:
-            continue
-        topic = row.get("topic") or row.get("details") or f"{class_name} {subject} 수업"
-        objective = row.get("objective") or f"{topic} 내용을 이해하고 적용한다."
-        return {"lesson_topic": str(topic), "theme_objective": str(objective)}
+    mmdd = re.findall(r"(\d{1,2})[./-](\d{1,2})", dr)
+    if len(mmdd) < 2:
+        return infer_lesson_datetime(week_info)
+
+    start = datetime(year, int(mmdd[0][0]), int(mmdd[0][1]))
+    end = datetime(year, int(mmdd[1][0]), int(mmdd[1][1]))
+    if end < start:
+        end = end.replace(year=end.year + 1)
+
+    weekday_tokens = []
+    for match in WEEKDAY_TOKEN_RE.findall(raw):
+        weekday_tokens.extend(re.findall(r"[월화수목금토일]", match))
+    weekday_tokens = list(dict.fromkeys(weekday_tokens))
+    target_days = {WEEKDAY_MAP[t] for t in weekday_tokens if t in WEEKDAY_MAP}
+
+    explicit = []
+    for mm, dd, day in DATE_DAY_RE.findall(raw):
+        explicit.append(f"{int(mm)}.{int(dd)}({day})")
+    if explicit:
+        result = ", ".join(dict.fromkeys(explicit))
+        if HOLIDAY_RE.search(raw):
+            result += " [휴강/행사 확인]"
+        return result
+
+    all_dates = []
+    cur = start
+    while cur <= end:
+        if not target_days or cur.weekday() in target_days:
+            all_dates.append(cur)
+        cur += timedelta(days=1)
+
+    if not all_dates:
+        all_dates = [start, end] if start != end else [start]
+
+    weekday_rev = {v: k for k, v in WEEKDAY_MAP.items()}
+    label = ", ".join(f"{d.month}.{d.day}({weekday_rev[d.weekday()]})" for d in all_dates)
+    if HOLIDAY_RE.search(raw):
+        label += " [휴강/행사 확인]"
+    return label
+
+
+def suggest_topic_objective_from_syllabus(*, week_info: Dict, subject: str, outline_map: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    outline_map = {str(k).upper(): str(v) for k, v in (outline_map or {}).items()}
+    codes = extract_week_subsection_codes(week_info)
+
+    if codes:
+        topics = [outline_map.get(code, code) for code in codes]
+        lesson_topic = ", ".join(topics)
+        theme_objective = f"{lesson_topic} 관련 핵심 개념을 이해하고 활동으로 적용한다."
+        return {"lesson_topic": lesson_topic, "theme_objective": theme_objective}
 
     raw = str(week_info.get("details") or "").strip()
-    brief = raw[:60] if raw else f"{class_name} 핵심 단원"
+    brief = raw[:60] if raw else "핵심 단원"
     return {
         "lesson_topic": f"{subject} - {brief}",
         "theme_objective": f"{brief}를 바탕으로 핵심 개념을 이해하고 활동으로 적용한다.",

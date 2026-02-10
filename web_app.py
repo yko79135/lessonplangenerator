@@ -8,7 +8,11 @@ from typing import Dict, List, Optional
 
 import streamlit as st
 
-from google_drive_uploader import upload_report_as_google_doc
+from google_drive_uploader import (
+    GoogleAuthConfigError,
+    describe_available_auth_source,
+    upload_report_as_google_doc,
+)
 from lessonplan_bot import (
     generate_lesson_table_rows_text,
     infer_class_dates_from_week,
@@ -16,7 +20,7 @@ from lessonplan_bot import (
     parse_curriculum_sheet,
     parse_syllabus_pdf,
     parse_table_rows_text,
-    suggest_topic_objective,
+    suggest_topic_objective_from_syllabus,
 )
 from pdf_template import has_cjk_font, render_week_pdf
 
@@ -44,22 +48,13 @@ def save_index(items: List[Dict]) -> None:
     INDEX_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def add_syllabus(uploaded_pdf, curriculum_file=None) -> None:
+def add_syllabus(uploaded_pdf) -> None:
     item_id = str(uuid.uuid4())
     safe_pdf_name = uploaded_pdf.name.replace("/", "_").replace("\\", "_")
     pdf_path = SYLLABI_DIR / f"{item_id}_{safe_pdf_name}"
     pdf_path.write_bytes(uploaded_pdf.getbuffer())
 
-    weeks = parse_syllabus_pdf(pdf_path)
-
-    curriculum_path = ""
-    curriculum_rows = []
-    if curriculum_file is not None:
-        safe_cur_name = curriculum_file.name.replace("/", "_").replace("\\", "_")
-        cur_path = SYLLABI_DIR / f"{item_id}_{safe_cur_name}"
-        cur_path.write_bytes(curriculum_file.getbuffer())
-        curriculum_path = str(cur_path)
-        curriculum_rows = parse_curriculum_sheet(cur_path)
+    syllabus_parsed = parse_syllabus_pdf(pdf_path)
 
     index = load_index()
     index.append(
@@ -68,9 +63,8 @@ def add_syllabus(uploaded_pdf, curriculum_file=None) -> None:
             "name": uploaded_pdf.name,
             "path": str(pdf_path),
             "uploaded_at": datetime.now().isoformat(timespec="seconds"),
-            "weeks": weeks,
-            "curriculum_path": curriculum_path,
-            "curriculum_rows": curriculum_rows,
+            "weeks": syllabus_parsed.get("weeks", []),
+            "outline_map": syllabus_parsed.get("outline_map", {}),
         }
     )
     save_index(index)
@@ -81,8 +75,6 @@ def delete_syllabus(item_id: str) -> None:
     for item in load_index():
         if item.get("id") == item_id:
             Path(item.get("path", "")).unlink(missing_ok=True)
-            if item.get("curriculum_path"):
-                Path(item.get("curriculum_path", "")).unlink(missing_ok=True)
             continue
         updated.append(item)
     save_index(updated)
@@ -163,6 +155,7 @@ def main() -> None:
         "materials": "교재, 활동지, 필기구",
         "theme_objective": "",
         "lesson_rows_input": "",
+        "applied_draft_text": "",
         "evaluation": "특이사항 없음",
         "student_notes": "특이사항 없음",
         "teacher_notes": "특이사항 없음",
@@ -175,7 +168,6 @@ def main() -> None:
     st.subheader("1) Syllabus Library")
     with st.form("upload_form", clear_on_submit=True):
         up_pdf = st.file_uploader("강의계획서 PDF 업로드", type=["pdf"])
-        up_cur = st.file_uploader("커리큘럼 표 업로드(선택: .xlsx/.xls/.csv)", type=["xlsx", "xls", "csv"])
         upload_btn = st.form_submit_button("Syllabus 저장")
 
     if upload_btn:
@@ -183,7 +175,7 @@ def main() -> None:
             st.warning("PDF를 먼저 업로드하세요.")
         else:
             try:
-                add_syllabus(up_pdf, up_cur)
+                add_syllabus(up_pdf)
                 st.success("저장 완료")
                 st.rerun()
             except Exception as exc:
@@ -200,6 +192,21 @@ def main() -> None:
     if not selected:
         st.warning("선택 항목을 찾지 못했습니다.")
         return
+
+    if not selected.get("outline_map"):
+        try:
+            reparsed = parse_syllabus_pdf(Path(selected.get("path", "")))
+            selected["outline_map"] = reparsed.get("outline_map", {})
+            selected["weeks"] = reparsed.get("weeks", selected.get("weeks", []))
+            items = load_index()
+            for item in items:
+                if item.get("id") == selected.get("id"):
+                    item["outline_map"] = selected.get("outline_map", {})
+                    item["weeks"] = selected.get("weeks", [])
+                    break
+            save_index(items)
+        except Exception:
+            selected["outline_map"] = {}
 
     if st.button("선택한 강의계획서 삭제", type="secondary"):
         delete_syllabus(selected.get("id", ""))
@@ -233,6 +240,7 @@ def main() -> None:
         st.session_state["lesson_topic"] = inferred.get("lesson_topic", "")
         st.session_state["theme_objective"] = inferred.get("theme_objective", "")
         st.session_state["lesson_rows_input"] = ""
+        st.session_state["applied_draft_text"] = ""
         st.session_state["last_week_key"] = week_key
 
     # REQUIRED INPUT ORDER
@@ -253,6 +261,7 @@ def main() -> None:
                 class_plan_note=plan_note,
                 include_prayer=True,
             )
+            st.session_state["applied_draft_text"] = st.session_state["lesson_rows_input"]
         except Exception as exc:
             st.error(f"초안생성 실패: {exc}")
             st.code(traceback.format_exc())
@@ -263,9 +272,20 @@ def main() -> None:
         height=230,
     )
 
+
+    col_apply, col_hint = st.columns([1, 3])
+    with col_apply:
+        if st.button("(11-1) 수정 내용 반영"):
+            st.session_state["applied_draft_text"] = st.session_state.get("lesson_rows_input", "")
+            st.success("편집 내용이 결과물에 반영되었습니다.")
+    with col_hint:
+        st.caption("초안을 수정한 뒤 '(11-1) 수정 내용 반영'을 누르면 TXT/PDF/Google Docs 출력에 동일하게 반영됩니다.")
+
     evaluation = st.text_area("(12) 수업평가", key="evaluation", height=70)
     student_notes = st.text_area("(13) 학생특이사항", key="student_notes", height=70)
     teacher_notes = st.text_area("(14) 교사메모", key="teacher_notes", height=70)
+
+    export_draft_text = st.session_state.get("applied_draft_text") or draft_text
 
     fields = {
         "doc_title": doc_title,
@@ -303,15 +323,34 @@ def main() -> None:
         st.code(traceback.format_exc())
 
     st.subheader("3) Google Docs 업로드")
+    auth_source = describe_available_auth_source()
+    if auth_source:
+        st.caption(f"감지된 Google 인증 소스: {auth_source}")
+    else:
+        st.warning("Google 인증정보가 아직 없습니다. 아래에 인증 JSON을 붙여넣거나, secrets/env를 설정하세요.")
+
     folder_id = st.text_input("공유 Google Drive folder ID")
     doc_name = st.text_input("Google Doc 제목", value=f"{doc_title} - {week_pick}")
+    credential_override = st.text_area(
+        "Google 인증 JSON 직접 입력(선택)",
+        value="",
+        height=140,
+        help="authorized_user 또는 service_account JSON 전체를 붙여넣으면 현재 세션 업로드에 사용됩니다.",
+    )
 
     if st.button("Upload as Google Doc"):
         try:
-            full_text = compose_report_text(fields, draft_text)
-            url = upload_report_as_google_doc(title=doc_name, body_text=full_text, folder_id=folder_id)
+            full_text = compose_report_text(fields, export_draft_text)
+            url = upload_report_as_google_doc(
+                title=doc_name,
+                body_text=full_text,
+                folder_id=folder_id,
+                credential_json_override=credential_override,
+            )
             st.success("Google Doc 업로드 완료")
             st.markdown(f"[문서 열기]({url})")
+        except GoogleAuthConfigError as exc:
+            st.error(f"Google 인증 설정 오류: {exc}")
         except Exception as exc:
             st.error(f"Google Docs 업로드 실패: {exc}")
             st.code(traceback.format_exc())
