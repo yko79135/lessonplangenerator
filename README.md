@@ -52,6 +52,14 @@ streamlit run web_app.py
 - 폴더 관리자가 서비스 계정 이메일을 해당 폴더에 **편집자(Editor)** 로 공유해야 합니다.
 - 관리자 권한 자체는 필요하지 않지만, 폴더 공유는 필수입니다.
 
+### 업로드 오류 트러블슈팅
+- `403 The caller does not have permission`
+  - Google Cloud에서 **Google Docs API**와 **Google Drive API**가 활성화되어 있는지 확인
+  - 서비스 계정 사용 시, 대상 폴더를 서비스 계정 이메일에 Editor로 공유
+  - 조직(Workspace) 정책에서 외부 앱/서비스 계정 API 호출을 차단하지 않았는지 확인
+- `401 Unauthorized`
+  - OAuth/서비스 계정 인증 JSON이 만료·폐기되지 않았는지 확인하고 재발급 후 재설정
+
 ## 안정성 메모
 - PDF 텍스트 추출은 `pypdf` 우선, 실패 시 `PyPDF2` fallback
 - PDF 렌더링은 긴 문자열/특수문자에 대해 줄바꿈/분할 방어 로직 포함
