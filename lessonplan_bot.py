@@ -167,9 +167,7 @@ def suggest_topic_objective(*, week_info: Dict, class_name: str, subject: str, c
 def generate_lesson_table_rows_text(*, week_info: Dict, class_plan_note: str, include_prayer: bool) -> str:
     intro = "기도 및 출석 확인, 지난 시간 복습" if include_prayer else "출석 확인, 지난 시간 복습"
     develop_seed = str(week_info.get("details") or "핵심 단원 학습")[:100]
-    safe_note = (class_plan_note or "개념 확인 활동").replace("\n", " ").replace("\r", " ").replace("|", "／").strip()
-    # Keep each table row as a single line so it won't be parsed into accidental extra rows.
-    develop = f"{develop_seed} 설명 및 활동 (메모: {safe_note or '개념 확인 활동'})"
+    develop = f"{develop_seed} 설명 및 활동\n- 메모: {class_plan_note or '개념 확인 활동'}"
     return (
         f"도입|10분|{intro}|집중 유도\n"
         f"전개|25분|{develop}|질의응답\n"
@@ -179,33 +177,15 @@ def generate_lesson_table_rows_text(*, week_info: Dict, class_plan_note: str, in
 
 def parse_table_rows_text(text: str) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
-    phase_tokens = {"도입", "전개", "정리", "마무리", "활동"}
     for raw_line in (text or "").splitlines():
         line = raw_line.strip()
         if not line:
             continue
-        pipe_count = line.count("|")
-
-        if pipe_count == 0:
+        if "|" not in line:
             if rows:
                 rows[-1]["content"] = (rows[-1]["content"] + "\n" + line).strip()
             else:
                 rows.append({"phase": "", "time": "", "content": line, "remarks": ""})
-            continue
-
-        if pipe_count < 3:
-            first_token = line.split("|", 1)[0].strip()
-            if first_token in phase_tokens:
-                parts = [p.strip() for p in line.split("|", 3)]
-                while len(parts) < 4:
-                    parts.append("")
-                rows.append({"phase": parts[0], "time": parts[1], "content": parts[2], "remarks": parts[3]})
-                continue
-
-            if rows:
-                rows[-1]["content"] = (rows[-1]["content"] + "\n" + line.replace("|", " ")).strip()
-            else:
-                rows.append({"phase": "", "time": "", "content": line.replace("|", " "), "remarks": ""})
             continue
 
         parts = [p.strip() for p in line.split("|", 3)]

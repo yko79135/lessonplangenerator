@@ -106,19 +106,6 @@ def compose_report_text(fields: Dict, draft_text: str) -> str:
         f"교사메모: {fields.get('teacher_notes', '특이사항 없음')}\n"
     )
 
-
-def _label(item: Dict) -> str:
-    return f"{item.get('name')} ({item.get('uploaded_at')})"
-
-
-def _get_selected(index: List[Dict], label: str) -> Optional[Dict]:
-    for item in index:
-        if _label(item) == label:
-            return item
-    return None
-
-
-
 def _infer_subject_name(filename: str, week_info: Dict) -> str:
     stem = Path(filename or "").stem
     cleaned = re.sub(r"[_\-]+", " ", stem)
@@ -168,6 +155,17 @@ def _infer_week_class_dates(week_info: Dict) -> str:
     if inferred_mmdd:
         return ", ".join([f"{int(m)}.{int(d)}" for m, d in inferred_mmdd[:4]])
     return inferred or "2.24, 2.26"
+
+def _label(item: Dict) -> str:
+    return f"{item.get('name')} ({item.get('uploaded_at')})"
+
+
+def _get_selected(index: List[Dict], label: str) -> Optional[Dict]:
+    for item in index:
+        if _label(item) == label:
+            return item
+    return None
+
 
 def main() -> None:
     st.set_page_config(page_title="주간 수업 계획서 및 보고서 생성기", layout="wide")
@@ -236,19 +234,20 @@ def main() -> None:
     week_info = weeks[week_options.index(week_pick)] if weeks else {"week_no": 1, "date_range": "N/A", "events": [], "details": ""}
 
     # infer defaults
-    subject_default = _infer_subject_name(selected.get("name", ""), week_info)
-    auto_datetime = _infer_week_class_dates(week_info)
-    auto_target = _infer_target_grade(week_info)
+    class_candidates = week_info.get("events") or ["G6"]
+    auto_class = class_candidates[0]
+    auto_datetime = infer_lesson_datetime(week_info)
+    auto_target = auto_class
     inferred = suggest_topic_objective(
         week_info=week_info,
-        class_name=auto_target,
-        subject=subject_default,
+        class_name=auto_class,
+        subject=selected.get("name", "수업").split(".")[0],
         curriculum_rows=selected.get("curriculum_rows", []),
     )
 
-    week_key = f"{selected.get('id')}::{week_info.get('week_no')}::{subject_default}::{auto_target}"
+    week_key = f"{selected.get('id')}::{week_info.get('week_no')}::{auto_class}"
     if st.session_state["last_week_key"] != week_key:
-        st.session_state["lesson_name"] = subject_default
+        st.session_state["lesson_name"] = auto_class
         st.session_state["lesson_datetime"] = auto_datetime
         st.session_state["target_group"] = auto_target
         st.session_state["lesson_topic"] = inferred.get("lesson_topic", "")
