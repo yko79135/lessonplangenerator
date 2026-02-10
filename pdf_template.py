@@ -149,7 +149,7 @@ def render_week_pdf(template_fields: Dict) -> bytes:
     right_w = page_w - left_w
     draw_box(x, y, left_w, total_h)
     draw_box(x + left_w, y, right_w, total_h)
-    draw_wrapped_text(x + 1, y + 1, left_w - 2, total_h - 2, f"교사: {template_fields.get('teacher_name', '고영찬')}\n수업: {template_fields.get('subject', '')}")
+    draw_wrapped_text(x + 1, y + 1, left_w - 2, total_h - 2, f"교사: {template_fields.get('teacher_name', '고영찬')}\n수업: {template_fields.get('class_name', template_fields.get('subject', ''))}")
     right_text = (
         f"수업날짜: {template_fields.get('lesson_datetime', template_fields.get('week_label', ''))}\n"
         f"대상: {template_fields.get('target_group', template_fields.get('class_name', ''))}"
@@ -178,7 +178,7 @@ def render_week_pdf(template_fields: Dict) -> bytes:
     head_h = 8
     x = pdf.l_margin
     y = pdf.get_y()
-    headers = ["주제", "시간", "내용", "참고사항"]
+    headers = ["단계", "시간", "내용", "비고"]
     for i, htxt in enumerate(headers):
         cx = x + sum(col_w[:i])
         draw_box(cx, y, col_w[i], head_h)

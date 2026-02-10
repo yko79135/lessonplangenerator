@@ -8,50 +8,67 @@ SCOPES = [
 ]
 
 
-def _read_service_account_info() -> Dict:
-    """Read service account JSON from Streamlit secrets or env var."""
-    # Keep import local so module can still be imported outside streamlit runtime.
+def _load_streamlit_secret(name: str):
     try:
         import streamlit as st
 
-        if "gcp_service_account" in st.secrets:
-            return dict(st.secrets["gcp_service_account"])
+        return st.secrets.get(name)
     except Exception:
-        pass
+        return None
 
-    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-    if raw:
-        return json.loads(raw)
+
+def _read_credentials_payload() -> Dict:
+    """Prefer OAuth user credential JSON, fallback to service account JSON."""
+    oauth_info = _load_streamlit_secret("gcp_oauth_user")
+    if oauth_info:
+        return {"type": "authorized_user", "data": dict(oauth_info)}
+
+    oauth_raw = os.getenv("GOOGLE_OAUTH_USER_JSON", "").strip()
+    if oauth_raw:
+        return {"type": "authorized_user", "data": json.loads(oauth_raw)}
+
+    sa_info = _load_streamlit_secret("gcp_service_account")
+    if sa_info:
+        return {"type": "service_account", "data": dict(sa_info)}
+
+    sa_raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if sa_raw:
+        return {"type": "service_account", "data": json.loads(sa_raw)}
 
     raise RuntimeError(
-        "Google service account 설정이 없습니다. "
-        "st.secrets['gcp_service_account'] 또는 GOOGLE_SERVICE_ACCOUNT_JSON을 설정하세요."
+        "Google 인증정보가 없습니다. GOOGLE_OAUTH_USER_JSON(권장) 또는 GOOGLE_SERVICE_ACCOUNT_JSON을 설정하세요."
     )
 
 
-def upload_report_as_google_doc(
-    *,
-    title: str,
-    body_text: str,
-    folder_id: str,
-) -> str:
-    """Create a Google Doc with body_text and move it to selected shared folder.
-
-    Returns the document URL.
-    """
-    from google.oauth2 import service_account
+def _build_google_services():
     from googleapiclient.discovery import build
 
-    info = _read_service_account_info()
-    creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+    payload = _read_credentials_payload()
+    creds = None
+
+    if payload["type"] == "authorized_user":
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+
+        creds = Credentials.from_authorized_user_info(payload["data"], scopes=SCOPES)
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+    else:
+        from google.oauth2 import service_account
+
+        creds = service_account.Credentials.from_service_account_info(payload["data"], scopes=SCOPES)
 
     docs_service = build("docs", "v1", credentials=creds, cache_discovery=False)
     drive_service = build("drive", "v3", credentials=creds, cache_discovery=False)
+    return docs_service, drive_service
+
+
+def upload_report_as_google_doc(*, title: str, body_text: str, folder_id: str) -> str:
+    docs_service, drive_service = _build_google_services()
 
     doc = docs_service.documents().create(body={"title": title}).execute()
     doc_id = doc["documentId"]
 
-    safe_text = (body_text or "").replace("\x00", " ")
     docs_service.documents().batchUpdate(
         documentId=doc_id,
         body={
@@ -59,23 +76,23 @@ def upload_report_as_google_doc(
                 {
                     "insertText": {
                         "location": {"index": 1},
-                        "text": safe_text,
+                        "text": (body_text or "").replace("\x00", " "),
                     }
                 }
             ]
         },
     ).execute()
 
-    if folder_id.strip():
-        # Move file into shared folder
-        file_meta = drive_service.files().get(fileId=doc_id, fields="parents").execute()
-        prev_parents = ",".join(file_meta.get("parents", []))
+    folder_id = (folder_id or "").strip()
+    if folder_id:
+        parent_info = drive_service.files().get(fileId=doc_id, fields="parents", supportsAllDrives=True).execute()
+        prev_parents = ",".join(parent_info.get("parents", []))
         drive_service.files().update(
             fileId=doc_id,
-            addParents=folder_id.strip(),
+            addParents=folder_id,
             removeParents=prev_parents,
-            fields="id, parents",
             supportsAllDrives=True,
+            fields="id, parents",
         ).execute()
 
     return f"https://docs.google.com/document/d/{doc_id}/edit"
