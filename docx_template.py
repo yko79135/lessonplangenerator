@@ -3,6 +3,8 @@ from typing import Dict
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Pt
 
 from lessonplan_bot import normalize_table_rows
@@ -23,6 +25,17 @@ def _set_cell_text(cell, text: str, *, bold: bool = False, align_center: bool = 
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
+def _set_table_left_indent(table, twips: int = 360) -> None:
+    """Indent tables slightly so the DOCX layout better matches the PDF spacing."""
+    tbl_pr = table._tbl.tblPr
+    tbl_ind = tbl_pr.find(qn("w:tblInd"))
+    if tbl_ind is None:
+        tbl_ind = OxmlElement("w:tblInd")
+        tbl_pr.append(tbl_ind)
+    tbl_ind.set(qn("w:w"), str(twips))
+    tbl_ind.set(qn("w:type"), "dxa")
+
+
 def render_week_docx(fields: Dict) -> bytes:
     document = Document()
 
@@ -35,6 +48,7 @@ def render_week_docx(fields: Dict) -> bytes:
     # Header blocks (2 columns) to mirror the PDF layout.
     info_table = document.add_table(rows=1, cols=2)
     info_table.style = "Table Grid"
+    _set_table_left_indent(info_table)
     left = (
         f"교사: {_safe_text(fields.get('teacher_name'), '고영찬')}\n"
         f"수업: {_safe_text(fields.get('class_name') or fields.get('subject'))}"
@@ -48,6 +62,7 @@ def render_week_docx(fields: Dict) -> bytes:
 
     materials_table = document.add_table(rows=1, cols=2)
     materials_table.style = "Table Grid"
+    _set_table_left_indent(materials_table)
     _set_cell_text(materials_table.rows[0].cells[0], "수업 필요 물품 / 준비물:", bold=True)
     _set_cell_text(materials_table.rows[0].cells[1], fields.get("materials", ""))
 
@@ -60,6 +75,7 @@ def render_week_docx(fields: Dict) -> bytes:
 
     topic_table = document.add_table(rows=1, cols=1)
     topic_table.style = "Table Grid"
+    _set_table_left_indent(topic_table)
     topic_objective = (
         f"수업 주제: {_safe_text(fields.get('lesson_topic'))}\n"
         f"수업 목적: {_safe_text(fields.get('theme_objective'))}"
@@ -75,6 +91,7 @@ def render_week_docx(fields: Dict) -> bytes:
 
     plan_table = document.add_table(rows=1, cols=4)
     plan_table.style = "Table Grid"
+    _set_table_left_indent(plan_table)
     headers = ["단계", "시간", "내용", "비고"]
     for idx, header in enumerate(headers):
         _set_cell_text(plan_table.rows[0].cells[idx], header, bold=True, align_center=True, size=11)
@@ -101,6 +118,7 @@ def render_week_docx(fields: Dict) -> bytes:
 
     report_table = document.add_table(rows=3, cols=2)
     report_table.style = "Table Grid"
+    _set_table_left_indent(report_table)
 
     teacher_note = _safe_text(fields.get("teacher_notes"), "특이사항 없음")
     edited_draft = _safe_text(fields.get("edited_draft"))
