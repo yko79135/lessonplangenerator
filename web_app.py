@@ -14,6 +14,16 @@ from google_drive_uploader import (
     describe_available_auth_source,
     upload_report_as_google_doc,
 )
+from lessonplan_bot import (
+    generate_lesson_table_rows_text,
+    infer_class_dates_from_week,
+    normalize_table_rows,
+    parse_curriculum_sheet,
+    parse_syllabus_pdf,
+    parse_table_rows_text,
+    suggest_topic_objective_from_syllabus,
+)
+import lessonplan_bot as lb
 from pdf_template import has_cjk_font, render_week_pdf
 
 
@@ -50,13 +60,13 @@ def save_index(items: List[Dict]) -> None:
     INDEX_PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def add_syllabus(uploaded_pdf, lb) -> None:
+def add_syllabus(uploaded_pdf) -> None:
     item_id = str(uuid.uuid4())
     safe_pdf_name = uploaded_pdf.name.replace("/", "_").replace("\\", "_")
     pdf_path = SYLLABI_DIR / f"{item_id}_{safe_pdf_name}"
     pdf_path.write_bytes(uploaded_pdf.getbuffer())
 
-    syllabus_parsed = lb.parse_syllabus_pdf(pdf_path)
+    syllabus_parsed = parse_syllabus_pdf(pdf_path)
 
     index = load_index()
     index.append(
@@ -181,7 +191,7 @@ def main() -> None:
             st.warning("PDF를 먼저 업로드하세요.")
         else:
             try:
-                add_syllabus(up_pdf, lb)
+                add_syllabus(up_pdf)
                 st.success("저장 완료")
                 st.rerun()
             except Exception as exc:
@@ -201,7 +211,7 @@ def main() -> None:
 
     if not selected.get("outline_map"):
         try:
-            reparsed = lb.parse_syllabus_pdf(Path(selected.get("path", "")))
+            reparsed = parse_syllabus_pdf(Path(selected.get("path", "")))
             selected["outline_map"] = reparsed.get("outline_map", {})
             selected["weeks"] = reparsed.get("weeks", selected.get("weeks", []))
             items = load_index()
@@ -229,12 +239,13 @@ def main() -> None:
     class_candidates = week_info.get("events") or ["G6"]
     class_for_mapping = class_candidates[0]
     auto_subject = _infer_subject_name(selected.get("name", ""), week_info)
-    auto_datetime = lb.infer_class_dates_from_week(week_info)
+    auto_datetime = infer_class_dates_from_week(week_info)
     auto_target = _infer_target_grade(week_info)
-    inferred = lb.suggest_topic_objective_from_syllabus(
+    inferred = suggest_topic_objective(
         week_info=week_info,
+        class_name=class_for_mapping,
         subject=auto_subject,
-        outline_map=selected.get("outline_map", {}),
+        curriculum_rows=selected.get("curriculum_rows", []),
     )
 
     week_key = f"{selected.get('id')}::{week_info.get('week_no')}::{class_for_mapping}"
@@ -304,10 +315,10 @@ def main() -> None:
         "evaluation": evaluation.strip() or "특이사항 없음",
         "student_notes": (student_notes or "").strip() or "특이사항 없음",
         "teacher_notes": teacher_notes.strip() or "특이사항 없음",
-        "lesson_rows": lb.normalize_table_rows(lb.parse_table_rows_text(export_draft_text)),
+        "lesson_rows": normalize_table_rows(parse_table_rows_text(draft_text)),
     }
 
-    full_txt = compose_report_text(fields, export_draft_text)
+    full_txt = compose_report_text(fields, draft_text)
     st.download_button(
         "Download TXT",
         data=full_txt.encode("utf-8"),
