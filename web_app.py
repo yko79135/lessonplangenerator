@@ -11,7 +11,8 @@ import streamlit as st
 from google_drive_uploader import upload_report_as_google_doc
 from lessonplan_bot import (
     generate_lesson_table_rows_text,
-    infer_lesson_datetime,
+    infer_class_dates_from_week,
+    normalize_table_rows,
     parse_curriculum_sheet,
     parse_syllabus_pdf,
     parse_table_rows_text,
@@ -134,28 +135,6 @@ def _infer_target_grade(week_info: Dict) -> str:
     return "G6"
 
 
-def _infer_week_class_dates(week_info: Dict) -> str:
-    search_space = " ".join([str(week_info.get("raw_text", "")), str(week_info.get("details", ""))])
-    mmdd = re.findall(r"(?<!\d)(\d{1,2})[./-](\d{1,2})(?!\d)", search_space)
-    if mmdd:
-        seen = []
-        for mm, dd in mmdd:
-            token = f"{int(mm)}.{int(dd)}"
-            if token not in seen:
-                seen.append(token)
-        return ", ".join(seen[:4])
-
-    dr = str(week_info.get("date_range", ""))
-    dr_mmdd = re.findall(r"(\d{1,2})[./-](\d{1,2})", dr)
-    if len(dr_mmdd) >= 2:
-        return ", ".join([f"{int(dr_mmdd[0][0])}.{int(dr_mmdd[0][1])}", f"{int(dr_mmdd[1][0])}.{int(dr_mmdd[1][1])}"])
-
-    inferred = infer_lesson_datetime(week_info)
-    inferred_mmdd = re.findall(r"(\d{1,2})\.(\d{1,2})", inferred)
-    if inferred_mmdd:
-        return ", ".join([f"{int(m)}.{int(d)}" for m, d in inferred_mmdd[:4]])
-    return inferred or "2.24, 2.26"
-
 def _label(item: Dict) -> str:
     return f"{item.get('name')} ({item.get('uploaded_at')})"
 
@@ -235,19 +214,20 @@ def main() -> None:
 
     # infer defaults
     class_candidates = week_info.get("events") or ["G6"]
-    auto_class = class_candidates[0]
-    auto_datetime = infer_lesson_datetime(week_info)
-    auto_target = auto_class
+    class_for_mapping = class_candidates[0]
+    auto_subject = _infer_subject_name(selected.get("name", ""), week_info)
+    auto_datetime = infer_class_dates_from_week(week_info)
+    auto_target = _infer_target_grade(week_info)
     inferred = suggest_topic_objective(
         week_info=week_info,
-        class_name=auto_class,
-        subject=selected.get("name", "수업").split(".")[0],
+        class_name=class_for_mapping,
+        subject=auto_subject,
         curriculum_rows=selected.get("curriculum_rows", []),
     )
 
-    week_key = f"{selected.get('id')}::{week_info.get('week_no')}::{auto_class}"
+    week_key = f"{selected.get('id')}::{week_info.get('week_no')}::{class_for_mapping}"
     if st.session_state["last_week_key"] != week_key:
-        st.session_state["lesson_name"] = auto_class
+        st.session_state["lesson_name"] = auto_subject
         st.session_state["lesson_datetime"] = auto_datetime
         st.session_state["target_group"] = auto_target
         st.session_state["lesson_topic"] = inferred.get("lesson_topic", "")
@@ -266,13 +246,12 @@ def main() -> None:
     theme_objective = st.text_area("(8) 수업목적", key="theme_objective", height=80)
     plan_note = st.text_area("(9) 수업계획서 메모(도입/전개/정리)", value="학생 참여형 활동 강화", height=90)
 
-    include_prayer = st.checkbox("기도 문구 포함", value=True)
     if st.button("(10) 초안생성", type="primary"):
         try:
             st.session_state["lesson_rows_input"] = generate_lesson_table_rows_text(
                 week_info=week_info,
                 class_plan_note=plan_note,
-                include_prayer=include_prayer,
+                include_prayer=True,
             )
         except Exception as exc:
             st.error(f"초안생성 실패: {exc}")
@@ -300,13 +279,14 @@ def main() -> None:
         "evaluation": evaluation.strip() or "특이사항 없음",
         "student_notes": (student_notes or "").strip() or "특이사항 없음",
         "teacher_notes": teacher_notes.strip() or "특이사항 없음",
-        "lesson_rows": parse_table_rows_text(draft_text),
+        "lesson_rows": normalize_table_rows(parse_table_rows_text(draft_text)),
     }
 
+    full_txt = compose_report_text(fields, draft_text)
     st.download_button(
         "Download TXT",
-        data=draft_text.encode("utf-8"),
-        file_name=f"week_{week_info.get('week_no', 1)}_lesson_rows.txt",
+        data=full_txt.encode("utf-8"),
+        file_name=f"week_{week_info.get('week_no', 1)}_report.txt",
         mime="text/plain",
     )
 
