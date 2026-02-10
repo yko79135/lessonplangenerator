@@ -1,7 +1,7 @@
 import csv
 import re
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -27,6 +27,9 @@ YEAR_RE = re.compile(r"\b(20\d{2})\b")
 HOLIDAY_RE = re.compile(r"휴강|공휴일|대체휴일|행사|시험")
 DATE_DAY_RE = re.compile(r"(\d{1,2})[./-](\d{1,2})\s*\(?([월화수목금토일])\)?")
 DAY_ONLY_RE = re.compile(r"[월화수목금토일](?:/[월화수목금토일])+")
+WEEKDAY_TOKEN_RE = re.compile(r"[월화수목금토일](?:\s*/\s*[월화수목금토일])+")
+
+WEEKDAY_MAP = {"월": 0, "화": 1, "수": 2, "목": 3, "금": 4, "토": 5, "일": 6}
 
 
 def _extract_pdf_text(path: Path) -> str:
@@ -141,6 +144,53 @@ def infer_lesson_datetime(week_info: Dict) -> str:
     return result or "일정 미확인"
 
 
+def infer_class_dates_from_week(week_info: Dict) -> str:
+    """Infer concrete class dates from date-range + weekday hints (화/목 etc.)."""
+    year = int(week_info.get("year") or date.today().year)
+    raw = " ".join([str(week_info.get("raw_text", "")), str(week_info.get("details", ""))])
+    dr = str(week_info.get("date_range", ""))
+
+    mmdd = re.findall(r"(\d{1,2})[./-](\d{1,2})", dr)
+    if len(mmdd) < 2:
+        return infer_lesson_datetime(week_info)
+
+    start = datetime(year, int(mmdd[0][0]), int(mmdd[0][1]))
+    end = datetime(year, int(mmdd[1][0]), int(mmdd[1][1]))
+    if end < start:
+        end = end.replace(year=end.year + 1)
+
+    weekday_tokens = []
+    for match in WEEKDAY_TOKEN_RE.findall(raw):
+        weekday_tokens.extend(re.findall(r"[월화수목금토일]", match))
+    weekday_tokens = list(dict.fromkeys(weekday_tokens))
+    target_days = {WEEKDAY_MAP[t] for t in weekday_tokens if t in WEEKDAY_MAP}
+
+    explicit = []
+    for mm, dd, day in DATE_DAY_RE.findall(raw):
+        explicit.append(f"{int(mm)}.{int(dd)}({day})")
+    if explicit:
+        result = ", ".join(dict.fromkeys(explicit))
+        if HOLIDAY_RE.search(raw):
+            result += " [휴강/행사 확인]"
+        return result
+
+    all_dates = []
+    cur = start
+    while cur <= end:
+        if not target_days or cur.weekday() in target_days:
+            all_dates.append(cur)
+        cur += timedelta(days=1)
+
+    if not all_dates:
+        all_dates = [start, end] if start != end else [start]
+
+    weekday_rev = {v: k for k, v in WEEKDAY_MAP.items()}
+    label = ", ".join(f"{d.month}.{d.day}({weekday_rev[d.weekday()]})" for d in all_dates)
+    if HOLIDAY_RE.search(raw):
+        label += " [휴강/행사 확인]"
+    return label
+
+
 def suggest_topic_objective(*, week_info: Dict, class_name: str, subject: str, curriculum_rows: Optional[List[Dict]] = None) -> Dict[str, str]:
     curriculum_rows = curriculum_rows or []
     week_no = int(week_info.get("week_no") or 0)
@@ -175,6 +225,28 @@ def generate_lesson_table_rows_text(*, week_info: Dict, class_plan_note: str, in
     )
 
 
+
+def normalize_table_rows(rows: Optional[List[Dict]]) -> List[Dict[str, str]]:
+    repaired: List[Dict[str, str]] = []
+    for row in rows or []:
+        phase = str((row or {}).get("phase", "")).strip()
+        time = str((row or {}).get("time", "")).strip()
+        content = str((row or {}).get("content", "")).strip()
+        remarks = str((row or {}).get("remarks", "")).strip()
+
+        if not any([phase, time, content, remarks]):
+            continue
+
+        if not content and repaired:
+            addon = " | ".join(v for v in [phase, time, remarks] if v)
+            if addon:
+                repaired[-1]["content"] = f"{repaired[-1]['content']}\n{addon}".strip()
+            continue
+
+        repaired.append({"phase": phase, "time": time, "content": content, "remarks": remarks})
+
+    return repaired
+
 def parse_table_rows_text(text: str) -> List[Dict[str, str]]:
     rows: List[Dict[str, str]] = []
     for raw_line in (text or "").splitlines():
@@ -192,4 +264,4 @@ def parse_table_rows_text(text: str) -> List[Dict[str, str]]:
         while len(parts) < 4:
             parts.append("")
         rows.append({"phase": parts[0], "time": parts[1], "content": parts[2], "remarks": parts[3]})
-    return rows
+    return normalize_table_rows(rows)
