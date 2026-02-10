@@ -179,9 +179,11 @@ def main() -> None:
         "student_notes": "특이사항 없음",
         "teacher_notes": "특이사항 없음",
         "last_week_key": "",
-        "google_oauth_state": "",
+        "oauth_state": "",
         "google_oauth_authorization_url": "",
-        "google_generated_oauth_user_json": "",
+        "gcp_oauth_user_payload": None,
+        "app_base_url": "",
+        "oauth_client_json_override": "",
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -366,60 +368,105 @@ def main() -> None:
     if client_source:
         st.caption(f"감지된 OAuth 클라이언트 소스: {client_source}")
 
-    st.markdown("#### OAuth 인증정보 생성(선택)")
-    redirect_uri = st.text_input("OAuth Redirect URI", value="urn:ietf:wg:oauth:2.0:oob")
-    oauth_client_override = st.text_area(
-        "OAuth Client JSON 직접 입력(선택)",
-        value="",
-        height=120,
-        help="Google Cloud에서 발급한 OAuth 클라이언트 JSON을 붙여넣으세요.",
-    )
+    st.markdown("#### OAuth 연결")
+    secret_base_url = ""
+    try:
+        secret_base_url = str(st.secrets.get("app_base_url", "")).strip()
+    except Exception:
+        secret_base_url = ""
 
-    col_oauth_1, col_oauth_2 = st.columns(2)
-    with col_oauth_1:
-        if st.button("(A) OAuth 동의 URL 생성"):
-            try:
+    if secret_base_url:
+        app_base_url = secret_base_url
+        st.caption(f"app_base_url (secrets): {app_base_url}")
+    else:
+        app_base_url = st.text_input(
+            "App Base URL",
+            value=st.session_state.get("app_base_url", ""),
+            help="예: https://YOUR_APP.streamlit.app",
+        ).strip()
+        st.session_state["app_base_url"] = app_base_url
+
+    redirect_uri = f"{app_base_url.rstrip('/')}/oauth/callback" if app_base_url else ""
+    st.caption(f"OAuth Redirect URI: {redirect_uri or '(App Base URL 필요)'}")
+
+    oauth_client_override = st.text_area(
+        "OAuth Client JSON",
+        value=st.session_state.get("oauth_client_json_override", ""),
+        height=160,
+        help=(
+            "Google Cloud Console > APIs & Services > Credentials에서 다운로드한 "
+            "OAuth 클라이언트 JSON(web 또는 installed)을 붙여넣으세요."
+        ),
+    )
+    st.session_state["oauth_client_json_override"] = oauth_client_override
+
+    query_code = st.query_params.get("code")
+    query_state = st.query_params.get("state")
+    if query_code and query_state:
+        try:
+            saved_state = st.session_state.get("oauth_state", "")
+            if not saved_state or query_state != saved_state:
+                st.error("OAuth state 검증 실패: 요청 위조 가능성으로 코드 교환을 중단했습니다.")
+            elif not redirect_uri:
+                st.error("OAuth 코드 교환 실패: App Base URL을 먼저 설정하세요.")
+            else:
+                creds = exchange_oauth_code_for_user_credentials(
+                    code=str(query_code),
+                    redirect_uri=redirect_uri,
+                    client_json_override=oauth_client_override,
+                )
+                st.session_state["gcp_oauth_user_payload"] = {"type": "authorized_user", "data": creds}
+                st.success("OAuth 연결 성공: 업로드에 사용할 사용자 인증정보가 저장되었습니다.")
+
+                try:
+                    st.query_params.clear()
+                except Exception:
+                    st.experimental_set_query_params()
+        except GoogleAuthConfigError as exc:
+            st.error(f"OAuth 코드 교환 실패: {exc}")
+        except Exception as exc:
+            st.error(f"OAuth 처리 중 오류: {exc}")
+            st.code(traceback.format_exc())
+
+    if st.button("Google 로그인 시작"):
+        try:
+            if not redirect_uri:
+                st.error("App Base URL을 먼저 입력하세요.")
+            else:
                 state = str(uuid.uuid4())
                 auth_url = build_oauth_authorization_url(
                     redirect_uri=redirect_uri,
                     state=state,
                     client_json_override=oauth_client_override,
                 )
-                st.session_state["google_oauth_state"] = state
+                st.session_state["oauth_state"] = state
                 st.session_state["google_oauth_authorization_url"] = auth_url
-                st.success("OAuth 동의 URL 생성 완료")
-            except GoogleAuthConfigError as exc:
-                st.error(f"OAuth 설정 오류: {exc}")
-
-    with col_oauth_2:
-        oauth_code = st.text_input("(B) 승인 코드 입력", value="")
-        if st.button("(C) 승인 코드로 인증 JSON 생성"):
-            try:
-                creds = exchange_oauth_code_for_user_credentials(
-                    code=oauth_code,
-                    redirect_uri=redirect_uri,
-                    client_json_override=oauth_client_override,
-                )
-                st.session_state["google_generated_oauth_user_json"] = json.dumps(creds, ensure_ascii=False, indent=2)
-                st.success("OAuth 사용자 인증 JSON 생성 완료")
-            except GoogleAuthConfigError as exc:
-                st.error(f"OAuth 코드 교환 실패: {exc}")
+                st.success("Google 로그인 링크가 생성되었습니다.")
+        except GoogleAuthConfigError as exc:
+            st.error(f"OAuth 설정 오류: {exc}")
+        except Exception as exc:
+            st.error(f"OAuth URL 생성 실패: {exc}")
+            st.code(traceback.format_exc())
 
     auth_url = st.session_state.get("google_oauth_authorization_url", "")
     if auth_url:
-        st.markdown(f"[OAuth 동의 화면 열기]({auth_url})")
+        st.link_button("Google 로그인", auth_url)
 
-    generated_json = st.session_state.get("google_generated_oauth_user_json", "")
-    if generated_json:
-        st.caption("아래 생성된 OAuth 사용자 인증 JSON을 그대로 업로드에 사용할 수 있습니다.")
+    if st.session_state.get("gcp_oauth_user_payload"):
+        st.caption("OAuth 사용자 인증이 현재 세션에 저장되었습니다.")
 
     folder_id = st.text_input("공유 Google Drive folder ID")
     doc_name = st.text_input("Google Doc 제목", value=f"{doc_title} - {week_pick}")
+    oauth_user_payload = st.session_state.get("gcp_oauth_user_payload")
+    session_credential_override = ""
+    if oauth_user_payload and isinstance(oauth_user_payload, dict) and isinstance(oauth_user_payload.get("data"), dict):
+        session_credential_override = json.dumps(oauth_user_payload["data"], ensure_ascii=False)
+
     credential_override = st.text_area(
         "OAuth 사용자 인증 JSON 직접 입력(선택)",
-        value=generated_json,
+        value=session_credential_override,
         height=160,
-        help="authorized_user JSON 전체를 붙여넣으면 현재 세션 업로드에 사용됩니다.",
+        help="authorized_user JSON 또는 {\"type\":\"authorized_user\",\"data\":{...}} 형식을 사용할 수 있습니다.",
     )
 
     if st.button("Upload as Google Doc"):

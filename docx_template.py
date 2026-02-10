@@ -6,7 +6,7 @@ from docx.enum.table import WD_ROW_HEIGHT_RULE
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt, Twips
+from docx.shared import Pt
 
 from lessonplan_bot import normalize_table_rows
 
@@ -37,7 +37,8 @@ def _set_cell_text(cell, text: str, *, bold: bool = False, align_center: bool = 
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
-def _set_table_left_indent(table, twips: int = TABLE_LEFT_INDENT_TWIPS) -> None:
+def _set_table_left_indent(table, twips: int = 360) -> None:
+    """Indent tables slightly so the DOCX layout better matches the PDF spacing."""
     tbl_pr = table._tbl.tblPr
     tbl_ind = tbl_pr.find(qn("w:tblInd"))
     if tbl_ind is None:
@@ -45,122 +46,6 @@ def _set_table_left_indent(table, twips: int = TABLE_LEFT_INDENT_TWIPS) -> None:
         tbl_pr.append(tbl_ind)
     tbl_ind.set(qn("w:w"), str(twips))
     tbl_ind.set(qn("w:type"), "dxa")
-
-
-def _set_table_width(table, width_twips: int) -> None:
-    tbl_pr = table._tbl.tblPr
-    tbl_w = tbl_pr.find(qn("w:tblW"))
-    if tbl_w is None:
-        tbl_w = OxmlElement("w:tblW")
-        tbl_pr.append(tbl_w)
-    tbl_w.set(qn("w:type"), "dxa")
-    tbl_w.set(qn("w:w"), str(width_twips))
-
-
-def _set_table_layout_fixed(table) -> None:
-    table.autofit = False
-    tbl_pr = table._tbl.tblPr
-    tbl_layout = tbl_pr.find(qn("w:tblLayout"))
-    if tbl_layout is None:
-        tbl_layout = OxmlElement("w:tblLayout")
-        tbl_pr.append(tbl_layout)
-    tbl_layout.set(qn("w:type"), "fixed")
-
-
-def _set_table_borders(table, size_eighth_pt: int = 8, color: str = "000000") -> None:
-    tbl_pr = table._tbl.tblPr
-    tbl_borders = tbl_pr.find(qn("w:tblBorders"))
-    if tbl_borders is None:
-        tbl_borders = OxmlElement("w:tblBorders")
-        tbl_pr.append(tbl_borders)
-
-    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
-        edge_tag = qn(f"w:{edge}")
-        edge_el = tbl_borders.find(edge_tag)
-        if edge_el is None:
-            edge_el = OxmlElement(f"w:{edge}")
-            tbl_borders.append(edge_el)
-        edge_el.set(qn("w:val"), "single")
-        edge_el.set(qn("w:sz"), str(size_eighth_pt))
-        edge_el.set(qn("w:space"), "0")
-        edge_el.set(qn("w:color"), color)
-
-
-def _set_table_cell_margins(table, margins_twips: Tuple[int, int, int, int]) -> None:
-    top, right, bottom, left = margins_twips
-    tbl_pr = table._tbl.tblPr
-    cell_mar = tbl_pr.find(qn("w:tblCellMar"))
-    if cell_mar is None:
-        cell_mar = OxmlElement("w:tblCellMar")
-        tbl_pr.append(cell_mar)
-
-    for side, value in (("top", top), ("right", right), ("bottom", bottom), ("left", left)):
-        side_tag = qn(f"w:{side}")
-        side_el = cell_mar.find(side_tag)
-        if side_el is None:
-            side_el = OxmlElement(f"w:{side}")
-            cell_mar.append(side_el)
-        side_el.set(qn("w:w"), str(value))
-        side_el.set(qn("w:type"), "dxa")
-
-
-def _set_cell_width(cell, width_twips: int) -> None:
-    tc_pr = cell._tc.get_or_add_tcPr()
-    tc_w = tc_pr.find(qn("w:tcW"))
-    if tc_w is None:
-        tc_w = OxmlElement("w:tcW")
-        tc_pr.append(tc_w)
-    tc_w.set(qn("w:type"), "dxa")
-    tc_w.set(qn("w:w"), str(width_twips))
-    cell.width = Twips(width_twips)
-
-
-def _set_row_height(row, height_twips: int) -> None:
-    row.height = Twips(height_twips)
-    row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
-
-
-def apply_fixed_table_layout(
-    table,
-    col_widths_twips: Sequence[int],
-    *,
-    row_heights_twips: Optional[Iterable[Optional[int]]] = None,
-    cell_margins_twips: Tuple[int, int, int, int] = DEFAULT_CELL_MARGINS_TWIPS,
-    table_width_twips: Optional[int] = None,
-    border_size_eighth_pt: int = 8,
-) -> None:
-    """Apply a stable, print-form-style table layout across Word versions."""
-    if not col_widths_twips:
-        return
-
-    resolved_table_width = table_width_twips or sum(col_widths_twips)
-
-    _set_table_layout_fixed(table)
-    _set_table_left_indent(table)
-    _set_table_width(table, resolved_table_width)
-    _set_table_borders(table, size_eighth_pt=border_size_eighth_pt)
-    _set_table_cell_margins(table, cell_margins_twips)
-
-    for idx, width_twips in enumerate(col_widths_twips):
-        if idx < len(table.columns):
-            table.columns[idx].width = Twips(width_twips)
-
-    for row in table.rows:
-        for idx, width_twips in enumerate(col_widths_twips):
-            if idx < len(row.cells):
-                _set_cell_width(row.cells[idx], width_twips)
-
-    if row_heights_twips is not None:
-        for row, height in zip(table.rows, row_heights_twips):
-            if height:
-                _set_row_height(row, height)
-
-
-def _apply_col_widths_to_new_rows(table, col_widths_twips: Sequence[int]) -> None:
-    for row in table.rows:
-        for idx, width_twips in enumerate(col_widths_twips):
-            if idx < len(row.cells):
-                _set_cell_width(row.cells[idx], width_twips)
 
 
 def render_week_docx(fields: Dict) -> bytes:
@@ -174,13 +59,7 @@ def render_week_docx(fields: Dict) -> bytes:
 
     info_table = document.add_table(rows=1, cols=2)
     info_table.style = "Table Grid"
-    apply_fixed_table_layout(
-        info_table,
-        HEADER_INFO_COL_WIDTHS,
-        row_heights_twips=[950],
-        table_width_twips=TABLE_WIDTH_TWIPS,
-    )
-
+    _set_table_left_indent(info_table)
     left = (
         f"교사: {_safe_text(fields.get('teacher_name'), '고영찬')}\n"
         f"수업: {_safe_text(fields.get('class_name') or fields.get('subject'))}"
@@ -194,12 +73,7 @@ def render_week_docx(fields: Dict) -> bytes:
 
     materials_table = document.add_table(rows=1, cols=2)
     materials_table.style = "Table Grid"
-    apply_fixed_table_layout(
-        materials_table,
-        MATERIALS_COL_WIDTHS,
-        row_heights_twips=[520],
-        table_width_twips=TABLE_WIDTH_TWIPS,
-    )
+    _set_table_left_indent(materials_table)
     _set_cell_text(materials_table.rows[0].cells[0], "수업 필요 물품 / 준비물:", bold=True)
     _set_cell_text(materials_table.rows[0].cells[1], fields.get("materials", ""))
 
@@ -212,12 +86,7 @@ def render_week_docx(fields: Dict) -> bytes:
 
     topic_table = document.add_table(rows=1, cols=1)
     topic_table.style = "Table Grid"
-    apply_fixed_table_layout(
-        topic_table,
-        TOPIC_COL_WIDTHS,
-        row_heights_twips=[1050],
-        table_width_twips=TABLE_WIDTH_TWIPS,
-    )
+    _set_table_left_indent(topic_table)
     topic_objective = (
         f"수업 주제: {_safe_text(fields.get('lesson_topic'))}\n"
         f"수업 목적: {_safe_text(fields.get('theme_objective'))}"
@@ -233,13 +102,7 @@ def render_week_docx(fields: Dict) -> bytes:
 
     plan_table = document.add_table(rows=1, cols=4)
     plan_table.style = "Table Grid"
-    apply_fixed_table_layout(
-        plan_table,
-        PLAN_COL_WIDTHS,
-        row_heights_twips=[420],
-        table_width_twips=TABLE_WIDTH_TWIPS,
-    )
-
+    _set_table_left_indent(plan_table)
     headers = ["단계", "시간", "내용", "비고"]
     for idx, header in enumerate(headers):
         _set_cell_text(plan_table.rows[0].cells[idx], header, bold=True, align_center=True, size=11)
@@ -271,12 +134,7 @@ def render_week_docx(fields: Dict) -> bytes:
 
     report_table = document.add_table(rows=3, cols=2)
     report_table.style = "Table Grid"
-    apply_fixed_table_layout(
-        report_table,
-        REPORT_COL_WIDTHS,
-        row_heights_twips=[520, 520, 900],
-        table_width_twips=TABLE_WIDTH_TWIPS,
-    )
+    _set_table_left_indent(report_table)
 
     teacher_note = _safe_text(fields.get("teacher_notes"), "특이사항 없음")
     edited_draft = _safe_text(fields.get("edited_draft"))
